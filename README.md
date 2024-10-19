@@ -60,3 +60,6 @@ python3 -m data_gen.stitch_egs_into_y_true.py \
  --grid-spacing 64 \
  --num-objs 10
 ```
+
+model takes samples from the `reference_egs` for the reference obj embeddings
+and takes samples from y_true_imgs ( with y_true.json ) for the image input
