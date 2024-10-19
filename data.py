@@ -49,7 +49,10 @@ class ConstrastiveExamples(object):
 
     def dataset(self, num_batches, batch_size, objs_per_batch):
 
-        if objs_per_batch > len(self.obj_ids):
+        if objs_per_batch is None:
+            objs_per_batch = len(self.obj_ids)
+            print("objs_per_batch", objs_per_batch)
+        elif objs_per_batch > len(self.obj_ids):
             raise Exception(f"not enough obj_ids ({len(self.obj_ids)}) to sample"
                             f" objs_per_batch ({objs_per_batch})")
 
