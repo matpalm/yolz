@@ -34,29 +34,29 @@ class ConstrastiveExamples(object):
         img_a = np.array(img)
         return img_a
 
-    def _anc_pos_generator(self, batch_size, objs_per_batch):
-        for _ in range(batch_size):
+    def _anc_pos_generator(self, num_pairs, objs_per_batch):
+        for _ in range(num_pairs):
             random.shuffle(self.obj_ids)
             for obj_id in self.obj_ids[:objs_per_batch]:
-
                 anc_fname = self._random_example_for(obj_id)
                 anc_img_a = self._load_fname(anc_fname)
                 yield anc_img_a, self.label_str_to_idx[obj_id]
-
                 pos_fname = anc_fname
                 while pos_fname == anc_fname:
                     pos_fname = self._random_example_for(obj_id)
                 pos_img_a = self._load_fname(pos_fname)
                 yield pos_img_a, self.label_str_to_idx[obj_id]
 
-    def dataset(self, batch_size, objs_per_batch):
+    def dataset(self, num_batches, batch_size, objs_per_batch):
 
         if objs_per_batch > len(self.obj_ids):
             raise Exception(f"not enough obj_ids ({len(self.obj_ids)}) to sample"
                             f" objs_per_batch ({objs_per_batch})")
 
         ds = tf.data.Dataset.from_generator(
-            lambda: self._anc_pos_generator(batch_size, objs_per_batch),
+            lambda: self._anc_pos_generator(
+                num_batches*batch_size,
+                objs_per_batch),
             output_signature=(
                 tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8),  # img
                 tf.TensorSpec(shape=(), dtype=tf.int64),               # label
@@ -82,7 +82,8 @@ if __name__ == '__main__':
                  "111","153","198",  # x3 green
                  "000","017","019"], # x3 blue
     )
-    ds = c_egs.dataset(batch_size=5,
+    ds = c_egs.dataset(num_batches=1,
+                       batch_size=5,
                        objs_per_batch=3)
     for x, y in ds:
         print(x.shape, y)
