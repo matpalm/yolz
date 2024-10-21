@@ -10,7 +10,6 @@ import optax
 
 from data import ConstrastiveExamples
 from models.embeddings import construct_embedding_model
-from util import to_pil_img, collage
 
 import numpy as np
 np.set_printoptions(precision=5, threshold=10000, suppress=True, linewidth=10000)
@@ -25,20 +24,19 @@ parser.add_argument('--batch-size', type=int, default=128,
 parser.add_argument('--objs-per-batch', type=int, default=32,
                     help='inner batch size, 2x for a,p pair.'
                          ' if None, use |--eg-obj-ids-json|')
-parser.add_argument('--height-width', type=int, default=64,
-                    help='patch height & width')
+parser.add_argument('--model-config-json', type=str, required=True,
+                    help='embedding model config json file')
 parser.add_argument('--eg-root-dir', type=str,
                     default='data/train/reference_patches',
                     help='.')
 parser.add_argument('--eg-obj-ids-json', type=str, default=None,
-                    help='if None use all entries from --eg-root-dir')
-parser.add_argument('--filter-sizes', type=str, default='[8,16,32]')
-parser.add_argument('--embedding-dim', type=int, default=128,
-                    help='final l2 output dim')
+                    help='ids to use, json str. if None use all entries from --eg-root-dir')
 parser.add_argument('--learning-rate', type=float, default=1e-3,
                     help='adam learning rate')
-parser.add_argument('--weights-pkl', type=str, default='weights/v1.pkl',
+parser.add_argument('--weights-pkl', type=str, default=None,
                     help='where to save final weights')
+parser.add_argument('--losses-json', type=str, default=None,
+                    help='where to write json list of losses')
 opts = parser.parse_args()
 print("opts", opts)
 
@@ -47,9 +45,10 @@ if (opts.eg_obj_ids_json is None) or (opts.eg_obj_ids_json == ''):
 else:
     obj_ids = json.loads(opts.eg_obj_ids_json)
 
-filter_sizes = json.loads(opts.filter_sizes)
-for f in filter_sizes:
-    assert type(f) == int and f > 0
+with open(opts.model_config_json, 'r') as f:
+    model_config = json.load(f)
+print('model_config', model_config)
+embedding_dim = model_config['embedding_dim']
 
 # start with simple case of x1 R, G, B example
 c_egs = ConstrastiveExamples(
@@ -61,12 +60,7 @@ dataset = c_egs.dataset(
     batch_size=opts.batch_size,
     objs_per_batch=opts.objs_per_batch)
 
-embedding_model = construct_embedding_model(
-    height=opts.height_width,
-    width=opts.height_width,
-    filter_sizes=filter_sizes,
-    embedding_dim=opts.embedding_dim
-)
+embedding_model = construct_embedding_model(**model_config)
 print(embedding_model.summary())
 
 def main_diagonal_softmax_cross_entropy(logits):
@@ -77,7 +71,7 @@ def main_diagonal_softmax_cross_entropy(logits):
 def constrastive_loss(params, nt_params, x):
     # x (2C,H,W,3)
     embeddings, nt_params = embedding_model.stateless_call(params, nt_params, x, training=True)
-    embeddings = embeddings.reshape((-1, 2, opts.embedding_dim))
+    embeddings = embeddings.reshape((-1, 2, embedding_dim))
     anchors = embeddings[:, 0]
     positives = embeddings[:, 1]
     gram_ish_matrix = jnp.einsum('ae,be->ab', anchors, positives)
@@ -99,6 +93,7 @@ def calculate_gradients(params, nt_params, x):
 
 opt = optax.adam(learning_rate=opts.learning_rate)
 
+@jit
 def train_step(params, nt_params, opt_state, x):
     (loss, nt_params_v), grads = calculate_gradients(params, nt_params, x)
     updates, opt_state = opt.update(grads, opt_state, params)
@@ -110,15 +105,16 @@ params = embedding_model.trainable_variables
 nt_params = embedding_model.non_trainable_variables
 opt_state = opt.init(params)
 
-train_step = jit(train_step)
-
+losses = []
 for e, (x, _y) in enumerate(dataset):
     x = jnp.array(x)
     if e == 0:
         print("x", x.shape)
     params, nt_params, opt_state, loss = train_step(params, nt_params, opt_state, x)
+    losses.append(loss)
     if e % 50 == 0:
         print('e', e, 'loss', loss)
+
 
 # set values back in model
 for variable, value in zip(embedding_model.trainable_variables, params):
@@ -131,6 +127,11 @@ import pickle
 if opts.weights_pkl is not None:
     with open(opts.weights_pkl, 'wb') as f:
         pickle.dump(embedding_model.get_weights(), f)
+
+# write losses
+if opts.losses_json is not None:
+    with open(opts.losses_json, 'w') as f:
+        json.dump(losses, f)
 
 # # test against example from final batch
 # embeddings = embedding_model(x[0], training=False)
