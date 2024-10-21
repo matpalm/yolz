@@ -16,6 +16,10 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--urdf-ids', type=str,
                     help='(json) str with urdfs ids to iterate over')
+parser.add_argument('--urdf-id-from', type=int, default=None,
+                    help='if set, generate from this urdf-id')
+parser.add_argument('--urdf-id-to', type=int, default=None,
+                    help='if set, generate to this urdf-id (exclusive)')
 parser.add_argument('--render-width-height', type=int, default=64)
 parser.add_argument('--render-fov', type=int, default=70)
 parser.add_argument('--num-examples', type=int, default=10,
@@ -24,7 +28,15 @@ parser.add_argument('--output-dir', type=str, required=True)
 opts = parser.parse_args()
 print(opts)
 
-urdf_ids = json.loads(opts.urdf_ids)
+urdf_ids = []
+if opts.urdf_ids is not None:
+    urdf_ids += json.loads(opts.urdf_ids)
+if opts.urdf_id_from is not None:
+    assert opts.urdf_id_to is not None
+    for i in range(opts.urdf_id_from, opts.urdf_id_to):
+        urdf_ids.append(f"{i:03d}")
+if len(urdf_ids) == 0:
+    raise Exception("no urdfs to generate, check --flags")
 
 #p.connect(p.GUI)
 p.connect(p.DIRECT)

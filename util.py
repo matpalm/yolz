@@ -19,10 +19,10 @@ def collage(pil_imgs, rows, cols):
     n = len(pil_imgs)
     if n != rows * cols:
         raise Exception()
-    img_h, img_w = pil_imgs[0].size
-    collage = Image.new('RGB', (rows*img_h, cols*img_w))
+    img_w, img_h = pil_imgs[0].size
+    collage = Image.new('RGB', (cols*img_w, rows*img_h))
     for i in range(n):
-        pr, pc = i%rows, i//rows
-        collage.paste(pil_imgs[i], (pr*img_h, pc*img_w))
+        pc, pr = i%cols, i//cols
+        collage.paste(pil_imgs[i], (pc*img_w, pr*img_h))
     return collage
 

@@ -2,7 +2,7 @@
 
 ## generate data
 
-render examples of all urdfs
+1. render examples of all urdfs for visual debugging
 
 ```
 mkdir data/all_egs
@@ -10,6 +10,42 @@ python3 -m data_gen.render_all_egs
 ```
 
 ( see also random urdfs https://github.com/matpalm/procedural_objects )
+
+2. render `data/{train,validate,test}/{reference,scene}_patches`
+
+```
+sh generate_split_chunk_data.sh
+```
+
+80/10/10 for train/validate/test
+80/20 for reference/scene patches
+
+## train / test v1 model
+
+train v1 embedding model
+
+```
+python3 v1_train.py
+
+opts Namespace(num_batches=1000, batch_size=128,
+objs_per_batch=32, height_width=64,
+eg_root_dir='data/train/reference_patches', eg_obj_ids_json=None,
+embedding_dim=128, learning_rate=0.001, weights_pkl='weights/v1.pkl')
+```
+
+embed all validation examples
+
+```
+find data/test/reference_patches/ -type f > test_reference_patches.manifest
+python3 embed.py \
+  --manifest test_reference_patches.manifest \
+  --weights-pkl weights/v1.pkl \
+  --embeddings-npy embeddings/v1.npy
+```
+
+
+
+# REWRITE BELOW
 
 POC training
 
@@ -42,7 +78,7 @@ next we get additional data, of same objects, that's used for the image branch
 
 ```
 python3 -m data_gen.render_reference_egs \
- --urdf-ids '["061","135","182","111","153","198","000","017","019"]' \
+ --urdf-ids '["061","135","182", "111","153","198","000","017","019"]' \
  --num-examples 100 \
  --output-dir data/scene_egs
 ```

@@ -4,6 +4,13 @@ from typing import List
 import random
 from PIL import Image
 import numpy as np
+from functools import cache
+
+def load_fname(fname):
+    img = Image.open(fname.strip())
+    img_a = np.array(img, dtype=float)
+    img_a /= 255
+    return img_a
 
 class ConstrastiveExamples(object):
 
@@ -13,13 +20,18 @@ class ConstrastiveExamples(object):
                  ):
 
         self.root_dir = root_dir
-        self.obj_ids = obj_ids
+
+        if obj_ids is None:
+            self.obj_ids = os.listdir(root_dir)
+            print(f"|obj_ids|={len(self.obj_ids)} read from {root_dir}")
+        else:
+            self.obj_ids = obj_ids
+
         self.manifest = {}  # { obj_id: [fnames], ... }
 
         # mapping from str obj_ids to [0, 1, 2, ... ]
-        self.label_idx_to_str = dict(enumerate(obj_ids))  # { 0:'053', 1:'234', .... }
+        self.label_idx_to_str = dict(enumerate(self.obj_ids))  # { 0:'053', 1:'234', .... }
         self.label_str_to_idx = {v: k for k, v in self.label_idx_to_str.items()}
-        print("self.label_idx_to_str", self.label_idx_to_str)
 
     def _random_example_for(self, obj_id) -> str:
         if obj_id not in self.manifest:
@@ -29,14 +41,14 @@ class ConstrastiveExamples(object):
         fname = random.choice(self.manifest[obj_id])
         return os.path.join(self.root_dir, obj_id, fname)
 
+    @cache
     def _load_fname(self, fname):
-        img = Image.open(fname)
-        img_a = np.array(img)
-        return img_a
+        return load_fname(fname)
 
     def _anc_pos_generator(self, num_pairs, objs_per_batch):
+        # each set of pairs should be the same objects
+        random.shuffle(self.obj_ids)
         for _ in range(num_pairs):
-            random.shuffle(self.obj_ids)
             for obj_id in self.obj_ids[:objs_per_batch]:
                 anc_fname = self._random_example_for(obj_id)
                 anc_img_a = self._load_fname(anc_fname)
@@ -51,7 +63,7 @@ class ConstrastiveExamples(object):
 
         if objs_per_batch is None:
             objs_per_batch = len(self.obj_ids)
-            print("objs_per_batch", objs_per_batch)
+            print("derived objs_per_batch", objs_per_batch)
         elif objs_per_batch > len(self.obj_ids):
             raise Exception(f"not enough obj_ids ({len(self.obj_ids)}) to sample"
                             f" objs_per_batch ({objs_per_batch})")

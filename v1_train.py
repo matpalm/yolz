@@ -20,25 +20,36 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--num-batches', type=int, default=100,
                     help='effective epoch length')
-parser.add_argument('--batch-size', type=int, default=32,
+parser.add_argument('--batch-size', type=int, default=128,
                     help='outer batch size')
-parser.add_argument('--num-egs-per-class', type=int, default=None,
+parser.add_argument('--objs-per-batch', type=int, default=32,
                     help='inner batch size, 2x for a,p pair.'
                          ' if None, use |--eg-obj-ids-json|')
-parser.add_argument('--height-width', type=int, default=64)
+parser.add_argument('--height-width', type=int, default=64,
+                    help='patch height & width')
 parser.add_argument('--eg-root-dir', type=str,
-                    default='data/reference_egs')
-parser.add_argument('--eg-obj-ids-json', type=str,
-                    default='["061","111","000"]')
-parser.add_argument('--embedding-dim', type=int, default=128)
-parser.add_argument('--learning-rate', type=float, default=1e-3)
-
-# root_dir
-# obj_ids
+                    default='data/train/reference_patches',
+                    help='.')
+parser.add_argument('--eg-obj-ids-json', type=str, default=None,
+                    help='if None use all entries from --eg-root-dir')
+parser.add_argument('--filter-sizes', type=str, default='[8,16,32]')
+parser.add_argument('--embedding-dim', type=int, default=128,
+                    help='final l2 output dim')
+parser.add_argument('--learning-rate', type=float, default=1e-3,
+                    help='adam learning rate')
+parser.add_argument('--weights-pkl', type=str, default='weights/v1.pkl',
+                    help='where to save final weights')
 opts = parser.parse_args()
 print("opts", opts)
 
-obj_ids = json.loads(opts.eg_obj_ids_json)
+if (opts.eg_obj_ids_json is None) or (opts.eg_obj_ids_json == ''):
+    obj_ids = None
+else:
+    obj_ids = json.loads(opts.eg_obj_ids_json)
+
+filter_sizes = json.loads(opts.filter_sizes)
+for f in filter_sizes:
+    assert type(f) == int and f > 0
 
 # start with simple case of x1 R, G, B example
 c_egs = ConstrastiveExamples(
@@ -48,11 +59,12 @@ c_egs = ConstrastiveExamples(
 dataset = c_egs.dataset(
     num_batches=opts.num_batches,
     batch_size=opts.batch_size,
-    objs_per_batch=opts.num_egs_per_class)
+    objs_per_batch=opts.objs_per_batch)
 
 embedding_model = construct_embedding_model(
     height=opts.height_width,
     width=opts.height_width,
+    filter_sizes=filter_sizes,
     embedding_dim=opts.embedding_dim
 )
 print(embedding_model.summary())
@@ -108,10 +120,22 @@ for e, (x, _y) in enumerate(dataset):
     if e % 50 == 0:
         print('e', e, 'loss', loss)
 
-# test against example from final batch
-embeddings, _ = embedding_model.stateless_call(params, nt_params, x[0], training=False)
-gramm_matrix = jnp.dot(embeddings, embeddings.T)  # (-1, 1)
-print("gram min", jnp.min(gramm_matrix))
-sims = (gramm_matrix + 1) / 2  # (0, 1)
-print("sims")
-print(np.around(sims, decimals=1))
+# set values back in model
+for variable, value in zip(embedding_model.trainable_variables, params):
+    variable.assign(value)
+for variable, value in zip(embedding_model.non_trainable_variables, nt_params):
+    variable.assign(value)
+
+# write weights as pickle
+import pickle
+if opts.weights_pkl is not None:
+    with open(opts.weights_pkl, 'wb') as f:
+        pickle.dump(embedding_model.get_weights(), f)
+
+# # test against example from final batch
+# embeddings = embedding_model(x[0], training=False)
+# gramm_matrix = jnp.dot(embeddings, embeddings.T)  # (-1, 1)
+# print("gram min", jnp.min(gramm_matrix))
+# sims = (gramm_matrix + 1) / 2  # (0, 1)
+# print("sims")
+# print(np.around(sims, decimals=1))
