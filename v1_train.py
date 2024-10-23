@@ -9,7 +9,7 @@ from jax import vmap, jit, value_and_grad, nn
 import optax
 
 from data import ConstrastiveExamples
-from models.embeddings import construct_embedding_model
+from models.models import construct_embedding_model
 
 import numpy as np
 np.set_printoptions(precision=5, threshold=10000, suppress=True, linewidth=10000)
