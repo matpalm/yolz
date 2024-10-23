@@ -2,7 +2,7 @@ import os
 os.environ['KERAS_BACKEND'] = 'jax'
 
 from data import load_fname
-from models import construct_embedding_model
+from models.models import construct_embedding_model
 
 import json
 from tqdm import tqdm

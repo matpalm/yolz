@@ -75,8 +75,8 @@ class ContrastiveExamples(object):
                 num_obj_references,
                 num_contrastive_objs),
             output_signature=(
-                tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8),  # img
-                tf.TensorSpec(shape=(), dtype=tf.int64),               # label
+                tf.TensorSpec(shape=(None, None, 3), dtype=tf.float32),  # img
+                tf.TensorSpec(shape=(), dtype=tf.int64),                 # label
             )
         )
 
@@ -104,13 +104,13 @@ if __name__ == '__main__':
                  "000","017","019"], # x3 blue
     )
     ds = c_egs.dataset(num_batches=1,
-                       batch_size=4,             # B
-                       num_obj_references=1,     # N
+                       batch_size=4,            # B
+                       num_obj_references=1,    # N
                        num_contrastive_objs=3)  # C
     for x, y in ds:
         print(x.shape, y)
 
-    # (5, 6, 64, 64, 3) -> (5, 3, [ap], 64, 64, 3)
+    # (B=4, N=1, 64, 64, 3) -> (5, 3, [ap], 64, 64, 3)
     # tf.Tensor(
     #    [[6 6 3 3 2 2]
     #     [3 3 7 7 1 1]
