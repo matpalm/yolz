@@ -8,7 +8,7 @@ from jax import vmap, jit, value_and_grad, nn
 
 import optax
 
-from data import ConstrastiveExamples
+from data import ContrastiveExamples
 from models.models import construct_embedding_model
 
 import numpy as np
@@ -20,9 +20,11 @@ parser = argparse.ArgumentParser(
 parser.add_argument('--num-batches', type=int, default=100,
                     help='effective epoch length')
 parser.add_argument('--batch-size', type=int, default=128,
-                    help='outer batch size')
-parser.add_argument('--objs-per-batch', type=int, default=32,
-                    help='inner batch size, 2x for a,p pair.'
+                    help='(B) outer batch size')
+# parser.add_argument('--num-obj-references', type=int, default=16,
+#                     help='(N). number of reference samples for each instance in C')
+parser.add_argument('--num-contrastive-objs', type=int, default=32,
+                    help='(C). inner batch size, 2x for a,p pair.'
                          ' if None, use |--eg-obj-ids-json|')
 parser.add_argument('--model-config-json', type=str, required=True,
                     help='embedding model config json file')
@@ -30,7 +32,8 @@ parser.add_argument('--eg-root-dir', type=str,
                     default='data/train/reference_patches',
                     help='.')
 parser.add_argument('--eg-obj-ids-json', type=str, default=None,
-                    help='ids to use, json str. if None use all entries from --eg-root-dir')
+                    help='ids to use, json str. if None use all'
+                         ' entries from --eg-root-dir')
 parser.add_argument('--learning-rate', type=float, default=1e-3,
                     help='adam learning rate')
 parser.add_argument('--weights-pkl', type=str, default=None,
@@ -50,15 +53,15 @@ with open(opts.model_config_json, 'r') as f:
 print('model_config', model_config)
 embedding_dim = model_config['embedding_dim']
 
-# start with simple case of x1 R, G, B example
-c_egs = ConstrastiveExamples(
+c_egs = ContrastiveExamples(
     root_dir=opts.eg_root_dir,
     obj_ids=obj_ids
 )
 dataset = c_egs.dataset(
     num_batches=opts.num_batches,
-    batch_size=opts.batch_size,
-    objs_per_batch=opts.objs_per_batch)
+    batch_size=opts.batch_size,                        # B
+    num_obj_references=1, # single example per object
+    num_contrastive_objs=opts.num_contrastive_objs)  # C
 
 embedding_model = construct_embedding_model(**model_config)
 print(embedding_model.summary())

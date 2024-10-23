@@ -12,7 +12,7 @@ def load_fname(fname):
     img_a /= 255
     return img_a
 
-class ConstrastiveExamples(object):
+class ContrastiveExamples(object):
 
     def __init__(self,
                  root_dir: str,
@@ -45,61 +45,68 @@ class ConstrastiveExamples(object):
     def _load_fname(self, fname):
         return load_fname(fname)
 
-    def _anc_pos_generator(self, num_pairs, objs_per_batch):
-        # each set of pairs should be the same objects
-        random.shuffle(self.obj_ids)
-        for _ in range(num_pairs):
-            for obj_id in self.obj_ids[:objs_per_batch]:
-                anc_fname = self._random_example_for(obj_id)
-                anc_img_a = self._load_fname(anc_fname)
-                yield anc_img_a, self.label_str_to_idx[obj_id]
-                pos_fname = anc_fname
-                while pos_fname == anc_fname:
-                    pos_fname = self._random_example_for(obj_id)
-                pos_img_a = self._load_fname(pos_fname)
-                yield pos_img_a, self.label_str_to_idx[obj_id]
+    def _anc_pos_generator(self, total_examples, num_obj_references, num_contrastive_objs):
+        for _ in range(total_examples):
+            random.shuffle(self.obj_ids)
+            for _ in range(num_obj_references):
+                for obj_id in self.obj_ids[:num_contrastive_objs]:
+                    anc_fname = self._random_example_for(obj_id)
+                    anc_img_a = self._load_fname(anc_fname)
+                    yield anc_img_a, self.label_str_to_idx[obj_id]
+                    pos_fname = anc_fname
+                    while pos_fname == anc_fname:
+                        pos_fname = self._random_example_for(obj_id)
+                    pos_img_a = self._load_fname(pos_fname)
+                    yield pos_img_a, self.label_str_to_idx[obj_id]
 
-    def dataset(self, num_batches, batch_size, objs_per_batch):
+    def dataset(self, num_batches, batch_size, num_obj_references, num_contrastive_objs):
 
-        if objs_per_batch is None:
-            objs_per_batch = len(self.obj_ids)
-            print("derived objs_per_batch", objs_per_batch)
-        elif objs_per_batch > len(self.obj_ids):
+        if num_contrastive_objs is None:
+            num_contrastive_objs = len(self.obj_ids)
+            print("derived num_contrastive_objs", num_contrastive_objs)
+        elif num_contrastive_objs > len(self.obj_ids):
             raise Exception(f"not enough obj_ids ({len(self.obj_ids)}) to sample"
-                            f" objs_per_batch ({objs_per_batch})")
+                            f" num_constrastive_objs ({num_contrastive_objs})")
 
+        total_examples = num_batches * batch_size
         ds = tf.data.Dataset.from_generator(
             lambda: self._anc_pos_generator(
-                num_batches*batch_size,
-                objs_per_batch),
+                total_examples,
+                num_obj_references,
+                num_contrastive_objs),
             output_signature=(
                 tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8),  # img
                 tf.TensorSpec(shape=(), dtype=tf.int64),               # label
             )
         )
 
-        # each sub batch is anc & pos pair for each obj
-        # select ith object pair as x.reshape(-1, 2)[i]
-        # ((2C, HW, HW, 3), (2C))
-        ds = ds.batch(2*objs_per_batch)
+        # inner batch for the contrastive pairs
+        # (2C, HW, HW, 3)
+        ds = ds.batch(2*num_contrastive_objs)
 
-        # batch again for _actual_ batch
-        # ((B, 2C, HW, HW, 3), (B, 2C))
+        # batch again for the N reference examples
+        # (N, 2C, HW, HW, 3). but ONLY IF num_obj_references > 1
+        if num_obj_references > 1:
+            ds = ds.batch(num_obj_references)
+
+        # final batch for B
+        # (B, N, 2C, HW, HW, 3)
         ds = ds.batch(batch_size)
 
         return ds
 
 
 if __name__ == '__main__':
-    c_egs = ConstrastiveExamples(
-        root_dir='data/reference_egs',
+    c_egs = ContrastiveExamples(
+        root_dir='data/train/reference_patches/',
         obj_ids=["061","135","182",  # x3 red
                  "111","153","198",  # x3 green
                  "000","017","019"], # x3 blue
     )
     ds = c_egs.dataset(num_batches=1,
-                       batch_size=5,
-                       objs_per_batch=3)
+                       batch_size=4,             # B
+                       num_obj_references=1,     # N
+                       num_contrastive_objs=3)  # C
     for x, y in ds:
         print(x.shape, y)
 
