@@ -30,13 +30,13 @@ class RandomObjIdGenerator(object):
         self.rnd.shuffle(self.obj_ids)
         return self.obj_ids[:self.num_objs]
 
-class ContrastiveExamples(object):
+
+class ObjIdsHelper(object):
 
     def __init__(self,
                  root_dir: str,
                  obj_ids: List[str]
-                 ):
-
+    ):
         self.root_dir = root_dir
 
         if obj_ids is None:
@@ -51,7 +51,7 @@ class ContrastiveExamples(object):
         self.label_idx_to_str = dict(enumerate(self.obj_ids))  # { 0:'053', 1:'234', .... }
         self.label_str_to_idx = {v: k for k, v in self.label_idx_to_str.items()}
 
-    def _random_example_for(self, obj_id) -> str:
+    def random_example_for(self, obj_id) -> str:
         if obj_id not in self.manifest:
             fnames = os.listdir(os.path.join(self.root_dir, obj_id))
             assert len(fnames) > 0, obj_id
@@ -60,34 +60,41 @@ class ContrastiveExamples(object):
         return os.path.join(self.root_dir, obj_id, fname)
 
     @cache
-    def _load_fname(self, fname):
+    def load_fname(self, fname):
         return load_fname(fname)
+
+
+class ContrastiveExamples(object):
+
+    def __init__(self,
+                 obj_ids_helper):
+        self.obj_ids_helper = obj_ids_helper
 
     def _anc_pos_generator(self, total_examples, num_obj_references):
         for _ in range(total_examples):
             obj_ids = self.rnd_obj_ids.next_ids()
             for _ in range(num_obj_references):    # N
                 for obj_id in obj_ids:             # C
-                    anc_fname = self._random_example_for(obj_id)
-                    anc_img_a = self._load_fname(anc_fname)
-                    yield anc_img_a, self.label_str_to_idx[obj_id]
+                    anc_fname = self.obj_ids_helper.random_example_for(obj_id)
+                    anc_img_a = self.obj_ids_helper.load_fname(anc_fname)
+                    yield anc_img_a, self.obj_ids_helper.label_str_to_idx[obj_id]
                     pos_fname = anc_fname
                     while pos_fname == anc_fname:
-                        pos_fname = self._random_example_for(obj_id)
-                    pos_img_a = self._load_fname(pos_fname)
-                    yield pos_img_a, self.label_str_to_idx[obj_id]
+                        pos_fname = self.obj_ids_helper.random_example_for(obj_id)
+                    pos_img_a = self.obj_ids_helper.load_fname(pos_fname)
+                    yield pos_img_a, self.obj_ids_helper.label_str_to_idx[obj_id]
 
     def dataset(self, num_batches, batch_size, num_obj_references, num_contrastive_objs, seed):
 
         if num_contrastive_objs is None:
-            num_contrastive_objs = len(self.obj_ids)
+            num_contrastive_objs = len(self.obj_ids_helper.obj_ids)
             print("derived num_contrastive_objs", num_contrastive_objs)
-        elif num_contrastive_objs > len(self.obj_ids):
-            raise Exception(f"not enough obj_ids ({len(self.obj_ids)}) to sample"
+        elif num_contrastive_objs > len(self.obj_ids_helper.obj_ids):
+            raise Exception(f"not enough obj_ids ({len(self.obj_ids_helper.obj_ids)}) to sample"
                             f" num_constrastive_objs ({num_contrastive_objs})")
 
         self.rnd_obj_ids = RandomObjIdGenerator(
-            self.obj_ids, num_contrastive_objs, seed)
+            self.obj_ids_helper.obj_ids, num_contrastive_objs, seed)
 
         total_examples = num_batches * batch_size
         ds = tf.data.Dataset.from_generator(
@@ -198,12 +205,15 @@ class SceneExamples(object):
         return ds
 
 if __name__ == '__main__':
-    c_egs = ContrastiveExamples(
+
+    obj_ids_helper = ObjIdsHelper(
         root_dir='data/train/reference_patches/',
         obj_ids=["061","135","182",  # x3 red
                  "111","153","198",  # x3 green
                  "000","017","019"], # x3 blue
     )
+
+    c_egs = ContrastiveExamples(obj_ids_helper)
     ds = c_egs.dataset(num_batches=1,
                        batch_size=4,            # B
                        num_obj_references=1,    # N
@@ -211,6 +221,10 @@ if __name__ == '__main__':
                        seed=123)
     for x, y in ds:
         print(x.shape, y)
+
+    from util import to_pil_img, collage
+    imgs = list(map(to_pil_img, x[0]))
+    collage(imgs, 3, 2).save("data.png")
 
     s_egs = SceneExamples(
         root_dir='data/train/reference_patches/',

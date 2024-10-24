@@ -13,7 +13,7 @@ def create_dir_if_required(d):
             pass
 
 def to_pil_img(a):
-    return Image.fromarray(np.array(a))
+    return Image.fromarray(np.array(a*255, dtype=np.uint8))
 
 def collage(pil_imgs, rows, cols):
     n = len(pil_imgs)
