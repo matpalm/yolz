@@ -40,6 +40,7 @@ class ObjIdsHelper(object):
     ):
         self.root_dir = root_dir
         self.seed = seed
+        self.rnd = random.Random(seed)
 
         if obj_ids is None:
             self.obj_ids = os.listdir(root_dir)
@@ -58,7 +59,7 @@ class ObjIdsHelper(object):
             fnames = os.listdir(os.path.join(self.root_dir, obj_id))
             assert len(fnames) > 0, obj_id
             self.manifest[obj_id] = fnames
-        fname = random.choice(self.manifest[obj_id])
+        fname = self.rnd.choice(self.manifest[obj_id])
         return os.path.join(self.root_dir, obj_id, fname)
 
     @cache
@@ -198,7 +199,7 @@ if __name__ == '__main__':
 
     from util import to_pil_img, collage
     imgs = list(map(to_pil_img, x[0]))
-    collage(imgs, 3, 2).save("data.png")
+    collage(imgs, 3, 2).save("data.ref_egs.png")
 
     s_egs = SceneExamples(
         root_dir='data/train/reference_patches/',
