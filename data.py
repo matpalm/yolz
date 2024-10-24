@@ -35,9 +35,11 @@ class ObjIdsHelper(object):
 
     def __init__(self,
                  root_dir: str,
-                 obj_ids: List[str]
+                 obj_ids: List[str],
+                 seed: int
     ):
         self.root_dir = root_dir
+        self.seed = seed
 
         if obj_ids is None:
             self.obj_ids = os.listdir(root_dir)
@@ -63,11 +65,23 @@ class ObjIdsHelper(object):
     def load_fname(self, fname):
         return load_fname(fname)
 
+    def check_or_derive(self, num_objs):
+        if num_objs is None:
+            num_objs = len(self.obj_ids_helper.obj_ids)
+            print("derived num_objs", num_objs)
+        elif num_objs > len(self.obj_ids):
+            raise Exception(f"not enough obj_ids ({len(self.obj_ids)}) to sample"
+                            f" num_objs. ({num_objs})")
+        return num_objs
+
+    def construct_random_obj_id_generator(self, num_objs):
+        return RandomObjIdGenerator(self.obj_ids, num_objs, self.seed)
+
 
 class ContrastiveExamples(object):
 
-    def __init__(self, root_dir: str, obj_ids: List[str]):
-        self.obj_ids_helper = ObjIdsHelper(root_dir, obj_ids)
+    def __init__(self, root_dir: str, obj_ids: List[str], seed):
+        self.obj_ids_helper = ObjIdsHelper(root_dir, obj_ids, seed)
 
     def _anc_pos_generator(self, total_examples, num_obj_references):
         for _ in range(total_examples):
@@ -83,17 +97,12 @@ class ContrastiveExamples(object):
                     pos_img_a = self.obj_ids_helper.load_fname(pos_fname)
                     yield pos_img_a, self.obj_ids_helper.label_str_to_idx[obj_id]
 
-    def dataset(self, num_batches, batch_size, num_obj_references, num_contrastive_objs, seed):
+    def dataset(self, num_batches, batch_size, num_obj_references, num_contrastive_objs):
 
-        if num_contrastive_objs is None:
-            num_contrastive_objs = len(self.obj_ids_helper.obj_ids)
-            print("derived num_contrastive_objs", num_contrastive_objs)
-        elif num_contrastive_objs > len(self.obj_ids_helper.obj_ids):
-            raise Exception(f"not enough obj_ids ({len(self.obj_ids_helper.obj_ids)}) to sample"
-                            f" num_constrastive_objs ({num_contrastive_objs})")
+        num_contrastive_objs = self.obj_ids_helper.check_or_derive(num_contrastive_objs)
 
-        self.rnd_obj_ids = RandomObjIdGenerator(
-            self.obj_ids_helper.obj_ids, num_contrastive_objs, seed)
+        self.rnd_obj_ids = self.obj_ids_helper.construct_random_obj_id_generator(
+            num_contrastive_objs)
 
         total_examples = num_batches * batch_size
         ds = tf.data.Dataset.from_generator(
@@ -123,8 +132,8 @@ class ContrastiveExamples(object):
 
 class SceneExamples(object):
 
-    def __init__(self, root_dir: str, obj_ids: List[str]):
-        self.obj_ids_helper = ObjIdsHelper(root_dir, obj_ids)
+    def __init__(self, root_dir: str, obj_ids: List[str], seed):
+        self.obj_ids_helper = ObjIdsHelper(root_dir, obj_ids, seed)
 
     def _scene_generator(self, total_examples):
         for _ in range(total_examples):
@@ -143,17 +152,12 @@ class SceneExamples(object):
                 # pos_img_a = self._load_fname(pos_fname)
                 # yield pos_img_a, self.label_str_to_idx[obj_id]
 
-    def dataset(self, num_batches, batch_size, num_objs, seed):
+    def dataset(self, num_batches, batch_size, num_objs):
 
-        if num_objs is None:
-            num_objs = len(self.obj_ids_helper.obj_ids)
-            print("derived num_objs", num_objs)
-        elif num_objs > len(self.obj_ids_helper.obj_ids):
-            raise Exception(f"not enough obj_ids ({len(self.obj_ids_helper.obj_ids)}) to sample"
-                            f" num_constrastive_objs ({num_objs})")
+        num_objs = self.obj_ids_helper.check_or_derive(num_objs)
 
-        self.rnd_obj_ids = RandomObjIdGenerator(
-            self.obj_ids_helper.obj_ids, num_objs, seed)
+        self.rnd_obj_ids = self.obj_ids_helper.construct_random_obj_id_generator(
+            num_objs)
 
         total_examples = num_batches * batch_size
         ds = tf.data.Dataset.from_generator(
@@ -182,12 +186,13 @@ if __name__ == '__main__':
         obj_ids=["061","135","182",  # x3 red
                  "111","153","198",  # x3 green
                  "000","017","019"], # x3 blue
+        seed=123
     )
     ds = c_egs.dataset(num_batches=1,
                        batch_size=4,            # B
                        num_obj_references=1,    # N
                        num_contrastive_objs=3,  # C
-                       seed=123)
+                       )
     for x, y in ds:
         print(x.shape, y)
 
@@ -200,11 +205,12 @@ if __name__ == '__main__':
         obj_ids=["061","135","182",  # x3 red
                  "111","153","198",  # x3 green
                  "000","017","019"], # x3 blue
+        seed=123
     )
     ds = s_egs.dataset(num_batches=1,
                        batch_size=4,  # B
                        num_objs=3,    # C
-                       seed=123)
+                       )
     for x, y in ds:
         print(x.shape, y)
 
