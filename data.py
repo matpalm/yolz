@@ -129,10 +129,53 @@ class ContrastiveExamples(object):
         # dataset will return num_batches instances of (2C, N, HW, HW, 3)
         return ds
 
-# class SceneExamples(object):
+class SceneExamples(object):
 
-#     def __init__(self, root_dir: str, obj_ids: List[str], seed):
-#         self.obj_ids_helper = ObjIdsHelper(root_dir, obj_ids, seed)
+    def __init__(self,
+                 root_dir: str,
+                 obj_ids: List[str],
+                 seed: int,
+                 grid_size: int):
+
+        self.obj_ids_helper = ObjIdsHelper(root_dir, obj_ids, seed)
+        self.obj_ids = obj_ids
+        self.seed = seed
+        self.grid_size = grid_size
+
+    def x_y_ids_for_example(
+            self,
+            obj_id: int,            # primary object id
+            num_other_objs: int,    # how many other objects to include
+            instances_per_obj: int,  # how many instance of each obj_id
+    ):
+        rnd = random.Random(self.seed)
+
+        # decide set of obj ids; seeded by obj_id
+        eg_obj_ids = set([obj_id])
+        while len(eg_obj_ids) < num_other_objs+1:
+            candidate_id = rnd.choice(self.obj_ids)
+            eg_obj_ids.add(candidate_id)
+        eg_obj_ids = list(eg_obj_ids)
+
+        # create generator for distinct x, y coords
+        def distinct_xy_generator():
+            yielded = set()
+            while True:
+                xy = (rnd.randint(0, self.grid_size-1),
+                      rnd.randint(0, self.grid_size-1))
+                if xy not in yielded:
+                    yield xy
+                    yielded.add(xy)
+        distinct_xy = distinct_xy_generator()
+
+        # generate x, y, obj_id examples
+        for obj_id in eg_obj_ids:
+            for _ in range(instances_per_obj):
+                yield *next(distinct_xy), obj_id
+
+
+
+
 
 #     def _scene_generator(self, total_examples):
 #         for _ in range(total_examples):
@@ -202,13 +245,19 @@ if __name__ == '__main__':
         collage(imgs, 3, 2).save(f"data.batch_{b}.n_1.png")
 
 
-    # s_egs = SceneExamples(
-    #     root_dir='data/train/reference_patches/',
-    #     obj_ids=["061","135","182",  # x3 red
-    #              "111","153","198",  # x3 green
-    #              "000","017","019"], # x3 blue
-    #     seed=123
-    # )
+    s_egs = SceneExamples(
+        root_dir='data/train/reference_patches/',
+        obj_ids=["061","135","182",  # x3 red
+                 "111","153","198",  # x3 green
+                 "000","017","019"], # x3 blue
+        seed=123,
+        grid_size=10,
+    )
+
+    print(list(
+        s_egs.x_y_ids_for_example(
+            obj_id='061', num_other_objs=3, instances_per_obj=5)))
+
     # ds = s_egs.dataset(num_batches=1,
     #                    batch_size=4,  # B
     #                    num_objs=3,    # C
