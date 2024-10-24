@@ -27,3 +27,5 @@ def collage(pil_imgs, rows, cols):
         collage.paste(pil_imgs[i], (pc*img_w, pr*img_h))
     return collage
 
+def highlight(pil_img, labels):
+    return pil_img

@@ -66,7 +66,8 @@ print(embedding_model.summary())
 
 def mean_embeddings(params, nt_params, x):
     # x (N, H, W, 3)
-    embeddings, nt_params = embedding_model.stateless_call(params, nt_params, x, training=True)  # (N, E)
+    embeddings, nt_params = embedding_model.stateless_call(
+        params, nt_params, x, training=True)  # (N, E)
     # average over N
     embeddings = jnp.mean(embeddings, axis=0)  # (E)
     # (re) L2 normalise
@@ -78,10 +79,10 @@ def main_diagonal_softmax_cross_entropy(logits):
     # one_hot mask for log_softmax ends up just being the main diagonal
     return -jnp.sum(jnp.diag(nn.log_softmax(logits)))
 
-def constrastive_loss(params, nt_params, x):
+def contrastive_loss(params, nt_params, x):
     # x (2C, N, H, W, 3) -> embeddings (2C, E)
-    embeddings, nt_params = vmap(mean_embeddings, in_axes=(None, None, 0))(params, nt_params, x)
-    nt_params = [jnp.mean(p, axis=0) for p in nt_params]
+    embeddings, nt_params = vmap(mean_embeddings, in_axes=(None, None, 0))(
+        params, nt_params, x)
     embeddings = embeddings.reshape((-1, 2, embedding_dim))  # (C, 2, E)
     anchors = embeddings[:, 0]
     positives = embeddings[:, 1]
@@ -91,7 +92,7 @@ def constrastive_loss(params, nt_params, x):
 
 def calculate_gradients(params, nt_params, x):
     # x (2C, N, H, W, 3)
-    grad_fn = value_and_grad(constrastive_loss, has_aux=True)
+    grad_fn = value_and_grad(contrastive_loss, has_aux=True)
     (loss, nt_params), grads = grad_fn(params, nt_params, x)
     return (loss, nt_params), grads
 
@@ -100,6 +101,7 @@ opt = optax.adam(learning_rate=opts.learning_rate)
 @jit
 def train_step(params, nt_params, opt_state, x):
     (loss, nt_params), grads = calculate_gradients(params, nt_params, x)
+    nt_params = [jnp.mean(p, axis=0) for p in nt_params]
     updates, opt_state = opt.update(grads, opt_state, params)
     params = optax.apply_updates(params, updates)
     return params, nt_params, opt_state, loss
