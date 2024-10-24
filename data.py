@@ -66,9 +66,8 @@ class ObjIdsHelper(object):
 
 class ContrastiveExamples(object):
 
-    def __init__(self,
-                 obj_ids_helper):
-        self.obj_ids_helper = obj_ids_helper
+    def __init__(self, root_dir: str, obj_ids: List[str]):
+        self.obj_ids_helper = ObjIdsHelper(root_dir, obj_ids)
 
     def _anc_pos_generator(self, total_examples, num_obj_references):
         for _ in range(total_examples):
@@ -124,36 +123,8 @@ class ContrastiveExamples(object):
 
 class SceneExamples(object):
 
-    def __init__(self,
-                root_dir: str,
-                obj_ids: List[str]
-                ):
-
-        self.root_dir = root_dir
-
-        if obj_ids is None:
-            self.obj_ids = os.listdir(root_dir)
-            print(f"|obj_ids|={len(self.obj_ids)} read from {root_dir}")
-        else:
-            self.obj_ids = obj_ids
-
-        self.manifest = {}  # { obj_id: [fnames], ... }
-
-        # mapping from str obj_ids to [0, 1, 2, ... ]
-        self.label_idx_to_str = dict(enumerate(self.obj_ids))  # { 0:'053', 1:'234', .... }
-        self.label_str_to_idx = {v: k for k, v in self.label_idx_to_str.items()}
-
-    def _random_example_for(self, obj_id) -> str:
-        if obj_id not in self.manifest:
-            fnames = os.listdir(os.path.join(self.root_dir, obj_id))
-            assert len(fnames) > 0, obj_id
-            self.manifest[obj_id] = fnames
-        fname = random.choice(self.manifest[obj_id])
-        return os.path.join(self.root_dir, obj_id, fname)
-
-    @cache
-    def _load_fname(self, fname):
-        return load_fname(fname)
+    def __init__(self, root_dir: str, obj_ids: List[str]):
+        self.obj_ids_helper = ObjIdsHelper(root_dir, obj_ids)
 
     def _scene_generator(self, total_examples):
         for _ in range(total_examples):
@@ -161,7 +132,7 @@ class SceneExamples(object):
             for obj_id in obj_ids:             # C
                 # generate a scene with this obj_id, as well as other
                 # distractor objects of any other obj_id
-                yield np.ones((1,1,3)), self.label_str_to_idx[obj_id]
+                yield np.ones((1,1,3)), self.obj_ids_helper.label_str_to_idx[obj_id]
 
                 # anc_fname = self._random_example_for(obj_id)
                 # anc_img_a = self._load_fname(anc_fname)
@@ -175,14 +146,14 @@ class SceneExamples(object):
     def dataset(self, num_batches, batch_size, num_objs, seed):
 
         if num_objs is None:
-            num_objs = len(self.obj_ids)
+            num_objs = len(self.obj_ids_helper.obj_ids)
             print("derived num_objs", num_objs)
-        elif num_objs > len(self.obj_ids):
-            raise Exception(f"not enough obj_ids ({len(self.obj_ids)}) to sample"
+        elif num_objs > len(self.obj_ids_helper.obj_ids):
+            raise Exception(f"not enough obj_ids ({len(self.obj_ids_helper.obj_ids)}) to sample"
                             f" num_constrastive_objs ({num_objs})")
 
         self.rnd_obj_ids = RandomObjIdGenerator(
-            self.obj_ids, num_objs, seed)
+            self.obj_ids_helper.obj_ids, num_objs, seed)
 
         total_examples = num_batches * batch_size
         ds = tf.data.Dataset.from_generator(
@@ -206,14 +177,12 @@ class SceneExamples(object):
 
 if __name__ == '__main__':
 
-    obj_ids_helper = ObjIdsHelper(
+    c_egs = ContrastiveExamples(
         root_dir='data/train/reference_patches/',
         obj_ids=["061","135","182",  # x3 red
                  "111","153","198",  # x3 green
                  "000","017","019"], # x3 blue
     )
-
-    c_egs = ContrastiveExamples(obj_ids_helper)
     ds = c_egs.dataset(num_batches=1,
                        batch_size=4,            # B
                        num_obj_references=1,    # N
