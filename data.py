@@ -84,31 +84,33 @@ class ContrastiveExamples(object):
     def __init__(self, root_dir: str, obj_ids: List[str], seed):
         self.obj_ids_helper = ObjIdsHelper(root_dir, obj_ids, seed)
 
-    def _anc_pos_generator(self, total_examples, num_obj_references):
-        for _ in range(total_examples):
+    def _anc_pos_generator(self, num_batches, num_obj_references):
+        for b in range(num_batches):
             obj_ids = self.rnd_obj_ids.next_ids()
-            for _ in range(num_obj_references):    # N
-                for obj_id in obj_ids:             # C
+            for obj_id in obj_ids:  # C
+                label_idx = self.obj_ids_helper.label_str_to_idx[obj_id]
+                for _ in range(num_obj_references):    # N
                     anc_fname = self.obj_ids_helper.random_example_for(obj_id)
                     anc_img_a = self.obj_ids_helper.load_fname(anc_fname)
-                    yield anc_img_a, self.obj_ids_helper.label_str_to_idx[obj_id]
-                    pos_fname = anc_fname
-                    while pos_fname == anc_fname:
-                        pos_fname = self.obj_ids_helper.random_example_for(obj_id)
+                    yield anc_img_a, label_idx
+                # TODO: pos should be strictly different to anchors
+                #       at the moment this is just 2x num_obj_references examples
+                for _ in range(num_obj_references):    # N
+                    pos_fname = self.obj_ids_helper.random_example_for(obj_id)
                     pos_img_a = self.obj_ids_helper.load_fname(pos_fname)
-                    yield pos_img_a, self.obj_ids_helper.label_str_to_idx[obj_id]
+                    yield pos_img_a, label_idx
 
-    def dataset(self, num_batches, batch_size, num_obj_references, num_contrastive_objs):
+    def dataset(self, num_batches, num_obj_references, num_contrastive_examples):
 
-        num_contrastive_objs = self.obj_ids_helper.check_or_derive(num_contrastive_objs)
+        num_contrastive_examples = self.obj_ids_helper.check_or_derive(num_contrastive_examples)
+        print("num_contrastive_examples", num_contrastive_examples)
 
         self.rnd_obj_ids = self.obj_ids_helper.construct_random_obj_id_generator(
-            num_contrastive_objs)
+            num_contrastive_examples)
 
-        total_examples = num_batches * batch_size
         ds = tf.data.Dataset.from_generator(
             lambda: self._anc_pos_generator(
-                total_examples,
+                num_batches,
                 num_obj_references),
             output_signature=(
                 tf.TensorSpec(shape=(None, None, 3), dtype=tf.float32),  # img
@@ -116,69 +118,65 @@ class ContrastiveExamples(object):
             )
         )
 
-        # inner batch for the contrastive pairs
-        # (2C, HW, HW, 3)
-        ds = ds.batch(2*num_contrastive_objs)
+        # inner batch is the N reference examples
+        # (N, HW, HW, 3)
+        ds = ds.batch(num_obj_references)
 
-        # batch again for the N reference examples
-        # (N, 2C, HW, HW, 3). but ONLY IF num_obj_references > 1
-        if num_obj_references > 1:
-            ds = ds.batch(num_obj_references)
+        # outer batch for the contrastive pairs
+        # (2C, N, HW, HW, 3)
+        ds = ds.batch(2*num_contrastive_examples)
 
-        # final batch for B
-        # (B, N, 2C, HW, HW, 3)
-        ds = ds.batch(batch_size)
-
+        # dataset will return num_batches instances of (2C, N, HW, HW, 3)
         return ds
 
-class SceneExamples(object):
+# class SceneExamples(object):
 
-    def __init__(self, root_dir: str, obj_ids: List[str], seed):
-        self.obj_ids_helper = ObjIdsHelper(root_dir, obj_ids, seed)
+#     def __init__(self, root_dir: str, obj_ids: List[str], seed):
+#         self.obj_ids_helper = ObjIdsHelper(root_dir, obj_ids, seed)
 
-    def _scene_generator(self, total_examples):
-        for _ in range(total_examples):
-            obj_ids = self.rnd_obj_ids.next_ids()
-            for obj_id in obj_ids:             # C
-                # generate a scene with this obj_id, as well as other
-                # distractor objects of any other obj_id
-                yield np.ones((1,1,3)), self.obj_ids_helper.label_str_to_idx[obj_id]
+#     def _scene_generator(self, total_examples):
+#         for _ in range(total_examples):
+#             obj_ids = self.rnd_obj_ids.next_ids()
+#             for obj_id in obj_ids:             # C
+#                 # generate a scene with this obj_id, as well as other
+#                 # distractor objects of any other obj_id
+#                 yield np.ones((1,1,3)), self.obj_ids_helper.label_str_to_idx[obj_id]
 
-                # anc_fname = self._random_example_for(obj_id)
-                # anc_img_a = self._load_fname(anc_fname)
-                # yield anc_img_a, self.label_str_to_idx[obj_id]
-                # pos_fname = anc_fname
-                # while pos_fname == anc_fname:
-                #     pos_fname = self._random_example_for(obj_id)
-                # pos_img_a = self._load_fname(pos_fname)
-                # yield pos_img_a, self.label_str_to_idx[obj_id]
+#                 # anc_fname = self._random_example_for(obj_id)
+#                 # anc_img_a = self._load_fname(anc_fname)
+#                 # yield anc_img_a, self.label_str_to_idx[obj_id]
+#                 # pos_fname = anc_fname
+#                 # while pos_fname == anc_fname:
+#                 #     pos_fname = self._random_example_for(obj_id)
+#                 # pos_img_a = self._load_fname(pos_fname)
+#                 # yield pos_img_a, self.label_str_to_idx[obj_id]
 
-    def dataset(self, num_batches, batch_size, num_objs):
+#     def dataset(self, num_batches, batch_size, num_objs):
 
-        num_objs = self.obj_ids_helper.check_or_derive(num_objs)
+#         num_objs = self.obj_ids_helper.check_or_derive(num_objs)
 
-        self.rnd_obj_ids = self.obj_ids_helper.construct_random_obj_id_generator(
-            num_objs)
+#         self.rnd_obj_ids = self.obj_ids_helper.construct_random_obj_id_generator(
+#             num_objs)
 
-        total_examples = num_batches * batch_size
-        ds = tf.data.Dataset.from_generator(
-            lambda: self._scene_generator(
-                total_examples),
-            output_signature=(
-                tf.TensorSpec(shape=(None, None, 3), dtype=tf.float32),  # img
-                tf.TensorSpec(shape=(), dtype=tf.int64),                 # label
-            )
-        )
+#         total_examples = num_batches * batch_size
+#         ds = tf.data.Dataset.from_generator(
+#             lambda: self._scene_generator(
+#                 total_examples),
+#             output_signature=(
+#                 tf.TensorSpec(shape=(None, None, 3), dtype=tf.float32),  # img
+#                 tf.TensorSpec(shape=(), dtype=tf.int64),                 # label
+#             )
+#         )
 
-        # first batch by class
-        # (C, HW, HW, 3)
-        ds = ds.batch(num_objs)
+#         # first batch by class
+#         # (C, HW, HW, 3)
+#         ds = ds.batch(num_objs)
 
-        # final batch for B
-        # (B, C, HW, HW, 3)
-        ds = ds.batch(batch_size)
+#         # final batch for B
+#         # (B, C, HW, HW, 3)
+#         ds = ds.batch(batch_size)
 
-        return ds
+#         return ds
 
 if __name__ == '__main__':
 
@@ -189,31 +187,34 @@ if __name__ == '__main__':
                  "000","017","019"], # x3 blue
         seed=123
     )
-    ds = c_egs.dataset(num_batches=1,
-                       batch_size=4,            # B
-                       num_obj_references=1,    # N
-                       num_contrastive_objs=3,  # C
+    ds = c_egs.dataset(num_batches=2,
+                       num_obj_references=2,        # N
+                       num_contrastive_examples=3,  # C
                        )
-    for x, y in ds:
-        print(x.shape, y)
-
     from util import to_pil_img, collage
-    imgs = list(map(to_pil_img, x[0]))
-    collage(imgs, 3, 2).save("data.ref_egs.png")
 
-    s_egs = SceneExamples(
-        root_dir='data/train/reference_patches/',
-        obj_ids=["061","135","182",  # x3 red
-                 "111","153","198",  # x3 green
-                 "000","017","019"], # x3 blue
-        seed=123
-    )
-    ds = s_egs.dataset(num_batches=1,
-                       batch_size=4,  # B
-                       num_objs=3,    # C
-                       )
-    for x, y in ds:
-        print(x.shape, y)
+    for b, (x, y) in enumerate(ds):
+        # (2xC=6, N=2, HW, HW, 3)
+        print("batch!", b, x.shape )#y)
+        imgs = list(map(to_pil_img, x[:,0])) # N=0
+        collage(imgs, 3, 2).save(f"data.batch_{b}.n_0.png")
+        imgs = list(map(to_pil_img, x[:,1])) # N=1
+        collage(imgs, 3, 2).save(f"data.batch_{b}.n_1.png")
+
+
+    # s_egs = SceneExamples(
+    #     root_dir='data/train/reference_patches/',
+    #     obj_ids=["061","135","182",  # x3 red
+    #              "111","153","198",  # x3 green
+    #              "000","017","019"], # x3 blue
+    #     seed=123
+    # )
+    # ds = s_egs.dataset(num_batches=1,
+    #                    batch_size=4,  # B
+    #                    num_objs=3,    # C
+    #                    )
+    # for x, y in ds:
+    #     print(x.shape, y)
 
     # (B=4, N=1, 64, 64, 3) -> (5, 3, [ap], 64, 64, 3)
     # tf.Tensor(

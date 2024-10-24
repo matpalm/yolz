@@ -18,7 +18,8 @@ def to_pil_img(a):
 def collage(pil_imgs, rows, cols):
     n = len(pil_imgs)
     if n != rows * cols:
-        raise Exception()
+        raise Exception(f"received {len(pil_imgs)} images but a"
+                        f" collage of ({rows}, {cols}) was requested")
     img_w, img_h = pil_imgs[0].size
     collage = Image.new('RGB', (cols*img_w, rows*img_h))
     for i in range(n):

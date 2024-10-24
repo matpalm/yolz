@@ -19,11 +19,9 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--num-batches', type=int, default=100,
                     help='effective epoch length')
-parser.add_argument('--batch-size', type=int, default=128,
-                    help='(B) outer batch size')
 parser.add_argument('--num-obj-references', type=int, default=16,
                     help='(N). number of reference samples for each instance in C')
-parser.add_argument('--num-contrastive-objs', type=int, default=32,
+parser.add_argument('--num-contrastive-examples', type=int, default=32,
                     help='(C). inner batch size, 2x for a,p pair.'
                          ' if None, use |--eg-obj-ids-json|')
 parser.add_argument('--model-config-json', type=str, required=True,
@@ -55,13 +53,13 @@ embedding_dim = model_config['embedding_dim']
 
 c_egs = ContrastiveExamples(
     root_dir=opts.eg_root_dir,
-    obj_ids=obj_ids
+    obj_ids=obj_ids,
+    seed=123
 )
 dataset = c_egs.dataset(
-    num_batches=opts.num_batches,
-    batch_size=opts.batch_size,                      # B
-    num_obj_references=opts.num_obj_references,      # N
-    num_contrastive_objs=opts.num_contrastive_objs)  # C
+    num_batches=opts.num_batches,                            # B
+    num_obj_references=opts.num_obj_references,              # N
+    num_contrastive_examples=opts.num_contrastive_examples)  # C
 
 embedding_model = construct_embedding_model(**model_config)
 print(embedding_model.summary())
@@ -91,15 +89,9 @@ def constrastive_loss(params, nt_params, x):
     xent = main_diagonal_softmax_cross_entropy(logits=gram_ish_matrix)
     return jnp.mean(xent), nt_params
 
-def batch_constrastive_loss(params, nt_params, x):
-    # x (B, 2C, N, H, W, 3)
-    losses, nt_params = vmap(constrastive_loss, in_axes=(None, None, 0))(params, nt_params, x)
-    nt_params = [jnp.mean(p, axis=0) for p in nt_params]
-    return jnp.mean(losses), nt_params
-
 def calculate_gradients(params, nt_params, x):
-    # x (B, 2C, N, H, W, 3)
-    grad_fn = value_and_grad(batch_constrastive_loss, has_aux=True)
+    # x (2C, N, H, W, 3)
+    grad_fn = value_and_grad(constrastive_loss, has_aux=True)
     (loss, nt_params), grads = grad_fn(params, nt_params, x)
     return (loss, nt_params), grads
 
@@ -120,11 +112,8 @@ losses = []
 
 for e, (x,_y) in enumerate(tqdm.tqdm(dataset, total=opts.num_batches)):
     x = jnp.array(x)
+    # x (2C, N, H, W, 3)
 
-    # x from dataset is (B, N, 2C, H, W, 3)
-    # but we want to batch from right to left
-    # so reshape to (B, 2C, N, H, W, 3)
-    x = jnp.transpose(x, (0,2,1,3,4,5))
     if e == 0:
         print("x", x.shape)
 
