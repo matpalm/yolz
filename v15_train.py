@@ -8,7 +8,7 @@ from jax import vmap, jit, value_and_grad, nn
 
 import optax
 
-from data import ContrastiveExamples
+from data import ObjIdsHelper, ContrastiveExamples
 from models.models import construct_embedding_model
 
 import numpy as np
@@ -51,11 +51,14 @@ with open(opts.model_config_json, 'r') as f:
 print('model_config', model_config)
 embedding_dim = model_config['embedding_dim']
 
-c_egs = ContrastiveExamples(
+obj_ids_helper = ObjIdsHelper(
     root_dir=opts.eg_root_dir,
     obj_ids=obj_ids,
     seed=123
 )
+
+c_egs = ContrastiveExamples(obj_ids_helper)
+
 dataset = c_egs.dataset(
     num_batches=opts.num_batches,                            # B
     num_obj_references=opts.num_obj_references,              # N
@@ -112,17 +115,18 @@ opt_state = opt.init(params)
 
 losses = []
 
-for e, (x,_y) in enumerate(tqdm.tqdm(dataset, total=opts.num_batches)):
-    x = jnp.array(x)
-    # x (2C, N, H, W, 3)
+with tqdm.tqdm(dataset, total=opts.num_batches) as progress:
+    for e, (x,_y) in enumerate(progress):
+        x = jnp.array(x)
+        # x (2C, N, H, W, 3)
 
-    if e == 0:
-        print("x", x.shape)
+        if e == 0:
+            print("x", x.shape)
 
-    params, nt_params, opt_state, loss = train_step(params, nt_params, opt_state, x)
-    losses.append(loss)
-    if e % 50 == 0:
-        print('e', e, 'loss', loss)
+        params, nt_params, opt_state, loss = train_step(params, nt_params, opt_state, x)
+        losses.append(float(loss))
+        if e % 50 == 0:
+            progress.set_description(f"loss {loss}")
 
 
 # set values back in model
@@ -141,11 +145,3 @@ if opts.weights_pkl is not None:
 if opts.losses_json is not None:
     with open(opts.losses_json, 'w') as f:
         json.dump(losses, f)
-
-# # test against example from final batch
-# embeddings = embedding_model(x[0], training=False)
-# gramm_matrix = jnp.dot(embeddings, embeddings.T)  # (-1, 1)
-# print("gram min", jnp.min(gramm_matrix))
-# sims = (gramm_matrix + 1) / 2  # (0, 1)
-# print("sims")
-# print(np.around(sims, decimals=1))

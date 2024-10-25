@@ -5,6 +5,7 @@ import random
 from PIL import Image
 import numpy as np
 from functools import cache
+import copy
 
 def convert_dtype(pil_img):
     return np.array(pil_img, dtype=float) / 255
@@ -81,7 +82,7 @@ class ObjIdsHelper(object):
 class ContrastiveExamples(object):
 
     def __init__(self, obj_ids_helper):
-        self.obj_ids_helper = obj_ids_helper
+        self.obj_ids_helper = copy.deepcopy(obj_ids_helper)
 
     def _anc_pos_generator(self, num_batches, num_obj_references):
         for b in range(num_batches):
@@ -146,7 +147,7 @@ class SceneExamples(object):
                             f" num_other_objs={num_other_objs} into"
                             f" grid_size={grid_size}")
 
-        self.obj_ids_helper = obj_ids_helper
+        self.obj_ids_helper = copy.deepcopy(obj_ids_helper)
         self.grid_size = grid_size
         self.num_other_objs = num_other_objs
         self.instances_per_obj = instances_per_obj
@@ -263,9 +264,7 @@ if __name__ == '__main__':
     B = 2  # number of batches
     C = 4  # number of contrastive & focus objects
 
-    c_egs = ContrastiveExamples(
-        obj_ids_helper=copy.deepcopy(obj_ids_helper)
-    )
+    c_egs = ContrastiveExamples(obj_ids_helper)
     N = 3
     ds = c_egs.dataset(num_batches=B,
                        num_obj_references=N,
@@ -281,7 +280,7 @@ if __name__ == '__main__':
 
 
     s_egs = SceneExamples(
-        obj_ids_helper=copy.deepcopy(obj_ids_helper),
+        obj_ids_helper=obj_ids_helper,
         grid_size=10,
         num_other_objs=4,
         instances_per_obj=3,
@@ -291,9 +290,6 @@ if __name__ == '__main__':
                        num_focus_objects=C  # C
                        )
     for b, (bx, by) in enumerate(ds):
-        np.save('/tmp/bx.npy', bx)
-        np.save('/tmp/by.npy', by)
-
         print("s_egs batch!", b, bx.shape, by)
         for i in range(len(bx)):
             create_dir_if_required(f"data_egs/b{b}")

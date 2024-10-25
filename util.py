@@ -1,5 +1,5 @@
 import os
-from PIL import Image
+from PIL import Image, ImageDraw
 import numpy as np
 
 def create_dir_if_required(d):
@@ -28,4 +28,17 @@ def collage(pil_imgs, rows, cols):
     return collage
 
 def highlight(pil_img, labels):
+    # given a pil image and a 2D label array, 0s and 1s
+    # draw red "bboxes" on pil_img where labels is 1
+    iw, ih = pil_img.size
+    gw, gh = labels.shape
+    sw = iw / gw
+    sh = ih / gh
+    draw = ImageDraw.Draw(pil_img)
+    for x, y in np.argwhere(labels==1):
+        x0 = x * sw
+        x1 = x0 + sw
+        y0 = y * sh
+        y1 = y0 + sh
+        draw.rectangle((y0,x0,y1,x1), fill=None, outline='red')
     return pil_img
