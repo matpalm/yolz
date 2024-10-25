@@ -85,7 +85,7 @@ class ContrastiveExamples(object):
         self.obj_ids_helper = copy.deepcopy(obj_ids_helper)
 
     def _anc_pos_generator(self, num_batches, num_obj_references):
-        for b in range(num_batches):
+        for _ in range(num_batches):
             obj_ids = self.rnd_obj_ids.next_ids()
             for obj_id in obj_ids:  # C
                 label_idx = self.obj_ids_helper.label_str_to_idx[obj_id]
@@ -120,15 +120,19 @@ class ContrastiveExamples(object):
             )
         )
 
-        # inner batch is the N reference examples
+        # first batch is the N reference examples
         # (N, HW, HW, 3)
         ds = ds.batch(num_obj_references)
 
-        # outer batch for the contrastive pairs
-        # (2C, N, HW, HW, 3)
-        ds = ds.batch(2*num_contrastive_examples)
+        # second batch for the pairs
+        # (2, N, HW, HW, 3)
+        ds = ds.batch(2)
 
-        # dataset will return num_batches instances of (2C, N, HW, HW, 3)
+        # final batch for the num of examples
+        # (C, 2, N, HW, HW, 3)
+        ds = ds.batch(num_contrastive_examples)
+
+        # dataset will return num_batches examples
         return ds
 
 class SceneExamples(object):
@@ -266,17 +270,17 @@ if __name__ == '__main__':
 
     c_egs = ContrastiveExamples(obj_ids_helper)
     N = 3
-    ds = c_egs.dataset(num_batches=B,
+    c_ds = c_egs.dataset(num_batches=B,
                        num_obj_references=N,
                        num_contrastive_examples=C
                        )
-    for b, (bx, by) in enumerate(ds):
-        # (2xC=6, N=2, HW, HW, 3)
-        print("c_egs batch!", b, bx.shape, by)
-        for n in range(N):
-            imgs = list(map(to_pil_img, bx[:,n]))  # nth anc/pos set
-            create_dir_if_required(f"data_egs/b{b}")
-            collage(imgs, C, 2).save(f"data_egs/b{b}/c_egs.n{n}.png")
+    # for b, (bx, by) in enumerate(ds):
+    #     # (2xC=6, N=2, HW, HW, 3)
+    #     print("c_egs batch!", b, bx.shape, by)
+    #     for n in range(N):
+    #         imgs = list(map(to_pil_img, bx[:,n]))  # nth anc/pos set
+    #         create_dir_if_required(f"data_egs/b{b}")
+    #         collage(imgs, C, 2).save(f"data_egs/b{b}/c_egs.n{n}.png")
 
 
     s_egs = SceneExamples(
@@ -286,39 +290,31 @@ if __name__ == '__main__':
         instances_per_obj=3,
         seed=123,
     )
-    ds = s_egs.dataset(num_batches=B,
+    s_ds = s_egs.dataset(num_batches=B,
                        num_focus_objects=C  # C
                        )
-    for b, (bx, by) in enumerate(ds):
-        print("s_egs batch!", b, bx.shape, by)
-        for i in range(len(bx)):
-            create_dir_if_required(f"data_egs/b{b}")
-            scene_img = to_pil_img(bx[i])
-            scene_img = highlight(scene_img, by[i])
-            scene_img.save(f"data_egs/b{b}/s_egs.eg{i}.png")
 
-    # # render an example
-    # x_y_ids = s_egs.x_y_ids_for_example(
-    #         obj_id='061', num_other_objs=3, instances_per_obj=5)
-    # collage, labels = s_egs.render_example(
-    #     focus_obj_id='061', x_y_obj_ids=x_y_ids)
-    # collage.save('data_egs/s_eg.x.png')
-    # print('labels')
-    # print(labels)
+    for b, ((obj_x, obj_y), (scene_x, scene_y)) in enumerate(zip(c_ds, s_ds)):
+        obj_x = np.array(obj_x)
+        obj_y = np.array(obj_y)
+        scene_x = np.array(scene_x)
+        scene_y = np.array(scene_y)
+        print("b", b,
+              "obj_", obj_x.shape, obj_y.shape,
+              "scene_", scene_x.shape, scene_y.shape)
 
-    # ds = s_egs.dataset(num_batches=1,
-    #                    batch_size=4,  # B
-    #                    num_objs=3,    # C
-    #                    )
-    # for x, y in ds:
-    #     print(x.shape, y)
+        create_dir_if_required(f"data_egs/b{b}")
 
-    # (B=4, N=1, 64, 64, 3) -> (5, 3, [ap], 64, 64, 3)
-    # tf.Tensor(
-    #    [[6 6 3 3 2 2]
-    #     [3 3 7 7 1 1]
-    #     [5 5 6 6 2 2]
-    #     [2 2 8 8 5 5]
-    #     [1 1 2 2 7 7]], shape=(5, 6), dtype=int64)
+        # (C, AP=2, N, HW, HW, 3)
+        print("c_egs batch!", b, obj_x.shape, obj_y)
+        for n in range(N):
+            ancs_poss = obj_x[:,:,n]  # (C, 2, HW, HW, 3)
+            ancs_poss = np.reshape(ancs_poss, (-1, 64, 64, 3))  # (2C, HW, HW, 3)
+            imgs = list(map(to_pil_img, ancs_poss))
+            collage(imgs, C, 2).save(f"data_egs/b{b}/c_egs.n{n}.png")
 
-
+        print("s_egs batch!", b, scene_x.shape, scene_y)
+        for c in range(C):
+            scene_img = to_pil_img(scene_x[c])
+            scene_img = highlight(scene_img, scene_y[c])
+            scene_img.save(f"data_egs/b{b}/s_egs.eg{c}.png")

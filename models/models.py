@@ -48,7 +48,7 @@ def construct_embedding_model(
 
     return Model(input, embeddings)
 
-def construct_image_backbone(
+def construct_scene_model(
     height_width: int,
     base_filter_size: int
     ):

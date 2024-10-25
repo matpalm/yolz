@@ -57,7 +57,7 @@ obj_ids_helper = ObjIdsHelper(
     seed=123
 )
 
-c_egs = ContrastiveExamples(obj_ids_helper)
+c_egs = ContrastiveExamples(obj_ids_helper)  # (C, 2, N, HW, HW, 3)
 
 dataset = c_egs.dataset(
     num_batches=opts.num_batches,                            # B
@@ -83,18 +83,27 @@ def main_diagonal_softmax_cross_entropy(logits):
     return -jnp.sum(jnp.diag(nn.log_softmax(logits)))
 
 def contrastive_loss(params, nt_params, x):
-    # x (2C, N, H, W, 3) -> embeddings (2C, E)
+    # x (C, 2, N, H, W, 3)
+
+    # flatten anchors and positives in x
+    nhwc = x.shape[-4:]
+    x = x.reshape((-1, *nhwc))  # (2C, N, H, W, C)
+    # run embeddings
+    # note: vmapped mean_embeddings => need to reduce nt_params
     embeddings, nt_params = vmap(mean_embeddings, in_axes=(None, None, 0))(
-        params, nt_params, x)
+        params, nt_params, x)  # (2C, E)
+    nt_params = [jnp.mean(p, axis=0) for p in nt_params]
+    # restore C, 2 axis in embeddings and slice out ancs and positives
     embeddings = embeddings.reshape((-1, 2, embedding_dim))  # (C, 2, E)
     anchors = embeddings[:, 0]
     positives = embeddings[:, 1]
+    # calculate contrastive loss
     gram_ish_matrix = jnp.einsum('ae,be->ab', anchors, positives)
-    xent = main_diagonal_softmax_cross_entropy(logits=gram_ish_matrix)
-    return jnp.mean(xent), nt_params
+    metric_loss = main_diagonal_softmax_cross_entropy(logits=gram_ish_matrix)
+    return jnp.mean(metric_loss), nt_params
 
 def calculate_gradients(params, nt_params, x):
-    # x (2C, N, H, W, 3)
+    # x (C, 2, N, H, W, 3)
     grad_fn = value_and_grad(contrastive_loss, has_aux=True)
     (loss, nt_params), grads = grad_fn(params, nt_params, x)
     return (loss, nt_params), grads
@@ -104,7 +113,6 @@ opt = optax.adam(learning_rate=opts.learning_rate)
 @jit
 def train_step(params, nt_params, opt_state, x):
     (loss, nt_params), grads = calculate_gradients(params, nt_params, x)
-    nt_params = [jnp.mean(p, axis=0) for p in nt_params]
     updates, opt_state = opt.update(grads, opt_state, params)
     params = optax.apply_updates(params, updates)
     return params, nt_params, opt_state, loss
@@ -116,18 +124,14 @@ opt_state = opt.init(params)
 losses = []
 
 with tqdm.tqdm(dataset, total=opts.num_batches) as progress:
-    for e, (x,_y) in enumerate(progress):
-        x = jnp.array(x)
-        # x (2C, N, H, W, 3)
-
+    for e, (x, _y) in enumerate(progress):
+        x = jnp.array(x)  # (C, 2, N, H, W, 3)
         if e == 0:
-            print("x", x.shape)
-
+            print("x", "(C, 2, N, W, H, 3)", x.shape)
         params, nt_params, opt_state, loss = train_step(params, nt_params, opt_state, x)
         losses.append(float(loss))
         if e % 50 == 0:
             progress.set_description(f"loss {loss}")
-
 
 # set values back in model
 for variable, value in zip(embedding_model.trainable_variables, params):

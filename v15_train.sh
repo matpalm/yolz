@@ -2,15 +2,15 @@ set -ex
 
 export R=`dts`
 mkdir runs/$R
-echo '{"height_width":64, "filter_sizes":[16,32,64,128], "embedding_dim":128}' \
+echo '{"height_width":64, "filter_sizes":[16,32,64,256], "embedding_dim":128}' \
  > runs/$R/embedding_config.json
 
 time python3 v15_train.py \
  --model-config runs/$R/embedding_config.json \
- --num-batches 1000 \
+ --num-batches 2000 \
  --learning-rate 1e-4 \
- --num-obj-references 4 \
- --num-contrastive-examples 8 \
+ --num-obj-references 8 \
+ --num-contrastive-examples 16 \
  --weights-pkl runs/$R/weights.pkl \
  --losses-json runs/$R/losses.json
  # ~2min for 5000 batches
