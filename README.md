@@ -1,4 +1,6 @@
-# zero shot detection
+# zero shot yolo
+
+you only look o̶n̶c̶e̶ zero times
 
 ## generate data
 
