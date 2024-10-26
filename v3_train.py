@@ -5,6 +5,7 @@ import json, tqdm
 
 import jax.numpy as jnp
 from jax import vmap, jit, value_and_grad, nn
+from jax.lax import stop_gradient
 
 import optax
 
@@ -42,6 +43,7 @@ parser.add_argument('--eg-obj-ids-json', type=str, default=None,
                          ' entries from --eg-root-dir')
 parser.add_argument('--learning-rate', type=float, default=1e-3,
                     help='adam learning rate')
+parser.add_argument('--stop-anchor-gradient', action='store_true')
 parser.add_argument('--contrastive-loss-weight', type=float, default=1.0)
 parser.add_argument('--classifier-loss-weight', type=float, default=100.0)
 
@@ -152,6 +154,8 @@ def forward(params, nt_params, obj_x, scene_x, training):
     # second; run scene branch runs ( with just anchors for obj references )
 
     # classifier_logits (C, G, G, 1)
+    if opts.stop_anchor_gradient:
+        anchors = stop_gradient(anchors)
     classifier_logits, s_nt_params = scene_model.stateless_call(
         s_params, s_nt_params, [scene_x, anchors], training=training)
 

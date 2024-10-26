@@ -22,14 +22,14 @@ def conv_bn_relu(filters, y, name, one_by_one=False):
     main = BatchNormalization(name=f"{name}_bn_m")(main)
     main = Activation('relu', name=f"{name}_relu_m")(main)
 
-    branch = Conv2D(
-        filters=filters, strides=1, kernel_size=3,
-        activation=None, padding='same',
-        name=f"{name}_conv_b")(main)
-    branch = BatchNormalization(name=f"{name}_bn_b")(branch)
-    branch = Activation('relu', name=f"{name}_relu_b")(branch)
+    # branch = Conv2D(
+    #     filters=filters, strides=1, kernel_size=3,
+    #     activation=None, padding='same',
+    #     name=f"{name}_conv_b")(main)
+    # branch = BatchNormalization(name=f"{name}_bn_b")(branch)
+    # branch = Activation('relu', name=f"{name}_relu_b")(branch)
 
-    return main + branch
+    return main #+ branch
 
 class L2Normalisation(Layer):
     def call(self, x):
