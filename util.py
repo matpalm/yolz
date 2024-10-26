@@ -42,3 +42,23 @@ def highlight(pil_img, labels):
         y1 = y0 + sh
         draw.rectangle((y0,x0,y1,x1), fill=None, outline='red')
     return pil_img
+
+def smooth_highlight(pil_img, labels):
+    # given a pil image and a 2D label array with values (0, 1)
+    # draw red "bboxes" on pil_img where brightness is based on label value
+    iw, ih = pil_img.size
+    gw, gh = labels.shape
+    sw = iw / gw
+    sh = ih / gh
+    draw = ImageDraw.Draw(pil_img)
+    for i in range(gw):
+        for j in range(gh):
+            brightness = int(labels[i][j] * 255)
+            x0 = i * sw
+            x1 = x0 + sw
+            y0 = j * sh
+            y1 = y0 + sh
+            draw.rectangle((y0+2,x0+2,y1-2,x1-2),
+                           fill=None,
+                           outline=(255,255-brightness,255-brightness))
+    return pil_img

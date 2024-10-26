@@ -222,9 +222,9 @@ class SceneExamples(object):
         for b in range(num_batches):
             obj_ids = self.rnd_obj_ids.next_ids()
             for obj_id in obj_ids:  # C
-                print("scene._example_generator",
-                      f"batch={b} obj_id={obj_id}"
-                      f" ( label = {self.obj_ids_helper.label_str_to_idx[obj_id]} ) ")
+                # print("scene._example_generator",
+                #       f"batch={b} obj_id={obj_id}"
+                #       f" ( label = {self.obj_ids_helper.label_str_to_idx[obj_id]} ) ")
                 xy_ids = self.x_y_ids_for_example(obj_id)
                 pil_collage, labels = self.render_example(obj_id, xy_ids)
                 yield convert_dtype(pil_collage), labels
