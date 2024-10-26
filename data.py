@@ -53,7 +53,7 @@ class ObjIdsHelper(object):
 
         if obj_ids is None:
             self.obj_ids = os.listdir(root_dir)
-            print(f"|obj_ids|={len(self.obj_ids)} read from {root_dir}")
+#            print(f"|obj_ids|={len(self.obj_ids)} read from {root_dir}")
         else:
             self.obj_ids = obj_ids
 

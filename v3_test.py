@@ -7,9 +7,10 @@ import os
 import pickle
 
 import jax.numpy as jnp
-from jax import vmap, jit, nn
+from jax import vmap, jit
 from jax.lax import stop_gradient
 
+import numpy as np
 
 from data import construct_datasets
 from models.models import construct_embedding_model
@@ -75,9 +76,6 @@ with open(os.path.join(opts.run_dir, 'models_weights.pkl'), 'rb') as f:
     e_weights, s_weights = pickle.load(f)
     embedding_model.set_weights(e_weights)
     scene_model.set_weights(s_weights)
-
-validate_ds = construct_datasets(
-    opts.eg_validate_root_dir, 100, obj_ids, classifier_spatial_w, opts)
 
 def mean_embeddings(params, nt_params, x, training):
     # x (N, H, W, 3)
@@ -149,6 +147,9 @@ from jax.nn import softplus
 def binary_logistic_loss(label: int, logit: float) -> float:
   return softplus(jnp.where(label, -logit, logit))
 
+validate_ds = construct_datasets(
+    opts.eg_validate_root_dir, 100, obj_ids, classifier_spatial_w, opts)
+
 losses = []
 for step, ((obj_x, _obj_y), (scene_x, scene_y_true)) in enumerate(validate_ds):
     obj_x = jnp.array(obj_x)
@@ -159,9 +160,6 @@ for step, ((obj_x, _obj_y), (scene_x, scene_y_true)) in enumerate(validate_ds):
     y_pred_logit = y_pred_logit.flatten()
     y_true = scene_y_true.flatten()
     log_loss = jnp.mean(binary_logistic_loss(y_true, y_pred_logit))
+    losses.append(float(log_loss))
 
-    #print("yp", y_pred.shape, y_pred)
-    #print("yt", y_true.shape, y_true)
-    losses.append(log_loss(y_true, y_pred))
-
-print("mean log loss", jnp.mean(losses))
+print("mean log loss", np.mean(losses))
