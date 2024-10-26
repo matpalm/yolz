@@ -112,8 +112,3 @@ def construct_scene_model(
     return Model(inputs=[scene_input, obj_embedding_input],
                  outputs=classifier)
 
-
-
-
-
-

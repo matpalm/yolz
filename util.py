@@ -2,6 +2,9 @@ import os
 from PIL import Image, ImageDraw
 import numpy as np
 
+from jax.nn import softplus
+import jax.numpy as jnp
+
 def create_dir_if_required(d):
     if d in [None, '', ',']:
         return
@@ -62,3 +65,7 @@ def smooth_highlight(pil_img, labels):
                            fill=None,
                            outline=(255,255-brightness,255-brightness))
     return pil_img
+
+# from jaxopt
+def binary_logistic_loss(label: int, logit: float) -> float:
+    return softplus(jnp.where(label, -logit, logit))
