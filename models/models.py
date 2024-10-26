@@ -12,24 +12,24 @@ def conv_bn_relu(filters, y, name, one_by_one=False):
         main = Conv2D(
             filters=filters, strides=1, kernel_size=1,
             activation=None, padding='same',
-            name=f"{name}_conv1x1")(y)
+            name=f"{name}_conv1x1_m")(y)
     else:
         main = Conv2D(
             filters=filters, strides=2, kernel_size=3,
             activation=None, padding='same',
-            name=f"{name}_conv")(y)
+            name=f"{name}_conv_m")(y)
 
-    main = BatchNormalization(name=f"{name}_bn")(main)
-    main = Activation('relu', name=f"{name}_relu")(main)
+    main = BatchNormalization(name=f"{name}_bn_m")(main)
+    main = Activation('relu', name=f"{name}_relu_m")(main)
 
-    # TODO add this residual back in at end when scaling up
-    # branch = Conv2D(
-    #     filters=filters, strides=1, kernel_size=3,
-    #     activation=None, padding='same')(main)
-    # branch = BatchNormalization()(branch)
-    # branch = Activation('relu')(branch)
+    branch = Conv2D(
+        filters=filters, strides=1, kernel_size=3,
+        activation=None, padding='same',
+        name=f"{name}_conv_b")(main)
+    branch = BatchNormalization(name=f"{name}_bn_b")(branch)
+    branch = Activation('relu', name=f"{name}_relu_b")(branch)
 
-    return main #+ branch
+    return main + branch
 
 class L2Normalisation(Layer):
     def call(self, x):
@@ -69,23 +69,23 @@ def construct_embedding_model(
     return Model(input, embeddings)
 
 def construct_scene_model(
-    scene_height_width: int,
-    scene_filter_sizes: List[int],
-    scene_feature_dim: int,
+    height_width: int,
+    filter_sizes: List[int],
+    feature_dim: int,
     expected_obj_embedding_dim: int,
     classifier_filter_sizes: List[int],
     init_classifier_bias: int=-5
     ):
 
     # scene backbone
-    scene_input = Input((scene_height_width, scene_height_width, 3), name='scene_input')
+    scene_input = Input((height_width, height_width, 3), name='scene_input')
     y = scene_input
-    for i, f in enumerate(scene_filter_sizes):
+    for i, f in enumerate(filter_sizes):
         y = conv_bn_relu(filters=f, y=y, name=f"scene_{i}")
 
     # final feature layer ( projection, no relu )
     scene_features = Dense(
-        scene_feature_dim,
+        feature_dim,
         use_bias=False, activation=None,
         kernel_initializer=TruncatedNormal(),
         name='scene_features')(y)  # (B, F)

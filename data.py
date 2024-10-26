@@ -10,10 +10,13 @@ import copy
 def convert_dtype(pil_img):
     return np.array(pil_img, dtype=float) / 255
 
-@cache
 def load_fname(fname):
-    return Image.open(fname.strip())
-
+    try:
+        return Image.open(fname.strip())
+    except AssertionError as ae:
+        print("load_fname AssertionError?", str(ae))
+        print('fname', fname)
+        exit(-1)
 
 class RandomObjIdGenerator(object):
     # provides consistent obj_ids for a ContrastiveExamples &
@@ -197,24 +200,28 @@ class SceneExamples(object):
         labels = np.zeros((self.grid_size, self.grid_size), dtype=int)
 
         for x, y, obj_id in x_y_obj_ids:
+            try:
+                fname = self.obj_ids_helper.random_example_for(obj_id)
+                pil_img = load_fname(fname)
 
-            fname = self.obj_ids_helper.random_example_for(obj_id)
-            pil_img = load_fname(fname)
+                if collage is None:
+                    img_w, img_h = pil_img.size
+                    collage = Image.new(
+                        'RGB',
+                        (img_w * self.grid_size, img_h * self.grid_size),
+                        'white')
 
-            if collage is None:
-                img_w, img_h = pil_img.size
-                collage = Image.new(
-                    'RGB',
-                    (img_w * self.grid_size, img_h * self.grid_size),
-                    'white')
+                # recall PIL and numpy x/y are transposed
+                paste_y = img_w * x
+                paste_x = img_h * y
+                collage.paste(pil_img, (paste_x, paste_y))
 
-            # recall PIL and numpy x/y are transposed
-            paste_y = img_w * x
-            paste_x = img_h * y
-            collage.paste(pil_img, (paste_x, paste_y))
-
-            if obj_id == focus_obj_id:
-                 labels[x, y] = 1
+                if obj_id == focus_obj_id:
+                    labels[x, y] = 1
+            except AssertionError as ae:
+                print("getting 'assert self.png is not None' (???)")
+                print(str(ae))
+                print('fname', fname)
 
         return collage, labels
 

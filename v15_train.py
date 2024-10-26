@@ -10,6 +10,7 @@ import optax
 
 from data import ObjIdsHelper, ContrastiveExamples
 from models.models import construct_embedding_model
+import util
 
 import numpy as np
 np.set_printoptions(precision=5, threshold=10000, suppress=True, linewidth=10000)
@@ -122,6 +123,7 @@ nt_params = embedding_model.non_trainable_variables
 opt_state = opt.init(params)
 
 losses = []
+
 
 with tqdm.tqdm(dataset, total=opts.num_batches) as progress:
     for e, (x, _y) in enumerate(progress):
