@@ -6,6 +6,8 @@ parser.add_argument('--plot-png', type=str, default=None)
 opts = parser.parse_args()
 print("opts", opts)
 
+raise Exception("switch to wandb")
+
 import json
 import seaborn as sns
 import pandas as pd

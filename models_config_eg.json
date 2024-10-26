@@ -1,0 +1,15 @@
+{
+    "embedding": {
+      "height_width": 64,
+      "filter_sizes": [16, 32, 64, 128],
+      "embedding_dim": 128
+    },
+    "scene": {
+      "height_width": 640,
+      "filter_sizes": [4, 8, 16, 32, 128, 128],
+      "feature_dim": 128,
+      "expected_obj_embedding_dim": 128,
+      "classifier_filter_sizes": [128, 64],
+      "init_classifier_bias": -5
+    }
+}

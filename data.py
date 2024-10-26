@@ -4,8 +4,10 @@ from typing import List, Tuple
 import random
 from PIL import Image
 import numpy as np
-from functools import cache
+#from functools import cache
 import copy
+
+import jax.numpy as jnp
 
 def convert_dtype(pil_img):
     return np.array(pil_img, dtype=float) / 255
@@ -257,6 +259,30 @@ class SceneExamples(object):
         # dataset will return num_batches instances of (C, HW, HW, 3)
         return ds
 
+def construct_datasets(root_dir, num_batches, obj_ids, classifier_spatial_w, opts):
+    obj_ids_helper = ObjIdsHelper(
+        root_dir=root_dir,
+        obj_ids=obj_ids,
+        seed=123
+    )
+    obj_egs = ContrastiveExamples(obj_ids_helper)
+    obj_ds = obj_egs.dataset(num_batches=num_batches,
+                    num_obj_references=opts.num_obj_references,
+                    num_contrastive_examples=opts.num_focus_objs)
+    scene_egs = SceneExamples(
+        obj_ids_helper=obj_ids_helper,
+        grid_size=classifier_spatial_w,
+        num_other_objs=4,
+        instances_per_obj=3,
+        seed=123)
+    scene_ds = scene_egs.dataset(
+        num_batches=num_batches,
+        num_focus_objects=opts.num_focus_objs)
+    return zip(obj_ds, scene_ds)
+
+def jnp_arrayed(ds):
+    for (obj_x, _obj_y), (scene_x, scene_y_true) in ds:
+        yield jnp.array(obj_x), jnp.array(scene_x), jnp.array(scene_y_true)
 
 if __name__ == '__main__':
 
@@ -325,3 +351,4 @@ if __name__ == '__main__':
             scene_img = to_pil_img(scene_x[c])
             scene_img = highlight(scene_img, scene_y[c])
             scene_img.save(f"data_egs/b{b}/s_egs.eg{c}.png")
+

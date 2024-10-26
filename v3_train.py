@@ -2,6 +2,7 @@ import os
 os.environ['KERAS_BACKEND'] = 'jax'
 
 import json, tqdm
+import pickle
 
 import jax.numpy as jnp
 from jax import vmap, jit, value_and_grad, nn
@@ -9,13 +10,19 @@ from jax.lax import stop_gradient
 
 import optax
 
-from data import ObjIdsHelper, ContrastiveExamples, SceneExamples
+from data import construct_datasets, jnp_arrayed
 from models.models import construct_embedding_model
 from models.models import construct_scene_model
 from util import to_pil_img, smooth_highlight, highlight, collage, create_dir_if_required
 
 import numpy as np
 np.set_printoptions(precision=5, threshold=10000, suppress=True, linewidth=10000)
+
+# from jaxopt
+from jax.nn import softplus
+def binary_logistic_loss(label: int, logit: float) -> float:
+  return softplus(jnp.where(label, -logit, logit))
+
 
 import argparse
 parser = argparse.ArgumentParser(
@@ -79,32 +86,12 @@ classifier_spatial_h = classifier_shape[2]
 assert classifier_spatial_w == classifier_spatial_h
 
 ## datasets
-
-def construct_datasets(root_dir):
-    obj_ids_helper = ObjIdsHelper(
-        root_dir=root_dir,
-        obj_ids=obj_ids,
-        seed=123
-    )
-    obj_egs = ContrastiveExamples(obj_ids_helper)
-    obj_ds = obj_egs.dataset(num_batches=opts.num_batches,
-                    num_obj_references=opts.num_obj_references,
-                    num_contrastive_examples=opts.num_focus_objs)
-    print(f"scene grid_size set to {classifier_spatial_h} from scene model")
-    scene_egs = SceneExamples(
-        obj_ids_helper=obj_ids_helper,
-        grid_size=classifier_spatial_w,
-        num_other_objs=4,
-        instances_per_obj=3,
-        seed=123)
-    scene_ds = scene_egs.dataset(
-        num_batches=opts.num_batches,
-        num_focus_objects=opts.num_focus_objs)
-    return zip(obj_ds, scene_ds)
-
-
-train_ds = construct_datasets(opts.eg_train_root_dir)
-validate_ds = construct_datasets(opts.eg_validate_root_dir)
+train_ds = construct_datasets(
+    opts.eg_train_root_dir, opts.num_batches,
+    obj_ids, classifier_spatial_w, opts)
+validate_ds = construct_datasets(
+    opts.eg_validate_root_dir, opts.num_batches,
+    obj_ids, classifier_spatial_w, opts)
 
 ## training
 
@@ -259,7 +246,6 @@ def write_weights():
     for variable, value in zip(scene_model.non_trainable_variables, s_nt_params):
         variable.assign(value)
     # write weights as pickle
-    import pickle
     with open(os.path.join(opts.run_dir, 'models_weights.pkl'), 'wb') as f:
         weights = (embedding_model.get_weights(),
                     scene_model.get_weights())
@@ -283,12 +269,21 @@ def generate_debug_imgs(step, obj_x, scene_x, scene_y_true, split):
     smooth_highlight(scene0, y_pred[0]).save(
         os.path.join(opts.run_dir, 'debug_imgs', f"s{step:06d}_{split}_y_pred.png"))
 
+def mean_log_loss(params, nt_params, root_dir, num_egs):
+    ds_for_log_loss = construct_datasets(
+        root_dir, num_egs,
+        obj_ids, classifier_spatial_w, opts)
+    losses = []
+    for obj_x, scene_x, scene_y_true in jnp_arrayed(ds_for_log_loss):
+        y_true = scene_y_true.flatten()
+        y_pred_logits = test_step(params, nt_params, obj_x, scene_x).flatten()
+        log_loss = jnp.mean(binary_logistic_loss(y_true, y_pred_logits))
+        losses.append(float(log_loss))
+    return np.mean(losses)
+
 losses = []
 with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
-    for step, ((obj_x, _obj_y), (scene_x, scene_y_true)) in enumerate(progress):
-        obj_x = jnp.array(obj_x)
-        scene_x = jnp.array(scene_x)
-        scene_y_true = jnp.array(scene_y_true)
+    for step, (obj_x, scene_x, scene_y_true) in enumerate(jnp_arrayed(progress)):
 
         params, nt_params, opt_state, loss = train_step(
             params, nt_params, opt_state,
@@ -306,7 +301,12 @@ with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
 
             losses.append((step, metric_loss, scene_loss))
 
-        if step % 100 == 0:
+        if step % 1000 == 0:
+            train_log_loss = mean_log_loss(
+                params, nt_params, opts.eg_train_root_dir, num_egs=100)
+            validation_log_loss = mean_log_loss(
+                params, nt_params, opts.eg_validate_root_dir, num_egs=100)
+            print("log_loss", step, 'train', train_log_loss, 'validate', validation_log_loss)
 
             # generate debug imgs for training with most recent batch
             generate_debug_imgs(step, obj_x, scene_x, scene_y_true, split='train')
