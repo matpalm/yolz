@@ -2,13 +2,11 @@ import os
 os.environ['KERAS_BACKEND'] = 'jax'
 
 import json, tqdm
-import pickle
 
 import jax.numpy as jnp
-from jax import vmap, jit, value_and_grad, nn
-from jax.lax import stop_gradient
-
+from jax import jit, nn
 import optax
+
 
 from data import construct_datasets, jnp_arrayed
 from models.yolz import Yolz
@@ -52,8 +50,19 @@ parser.add_argument('--learning-rate', type=float, default=1e-3,
 parser.add_argument('--stop-anchor-gradient', action='store_true')
 parser.add_argument('--contrastive-loss-weight', type=float, default=1.0)
 parser.add_argument('--classifier-loss-weight', type=float, default=100.0)
+parser.add_argument('--use-wandb', action='store_true')
 opts = parser.parse_args()
 print("opts", opts)
+
+if opts.use_wandb:
+    import wandb
+    wandb.init(project='yolz',
+                name=opts.run_dir,
+                reinit=True)
+    wandb.config.learning_rate=opts.learning_rate
+    wandb.config.stop_anchor_gradient=opts.stop_anchor_gradient
+    wandb.config.contrastive_loss_weight = opts.contrastive_loss_weight
+    wandb.config.classifier_loss_weight = opts.classifier_loss_weight
 
 if (opts.eg_obj_ids_json is None) or (opts.eg_obj_ids_json == ''):
     obj_ids = None
@@ -65,7 +74,12 @@ with open(opts.models_config_json, 'r') as f:
 print('models_config', models_config)
 
 # create model and extract initial params
-yolz = Yolz(models_config)
+yolz = Yolz(
+    models_config,
+    initial_weights_pkl=None,
+    stop_anchor_gradient=opts.stop_anchor_gradient,
+    contrastive_loss_weight=opts.contrastive_loss_weight,
+    classifier_loss_weight=opts.classifier_loss_weight)
 params, nt_params = yolz.get_params()
 
 # datasets
@@ -100,9 +114,9 @@ calculate_individual_losses = jit(yolz.calculate_individual_losses)
 print("running", opts.run_dir)
 
 def generate_debug_imgs(step, obj_x, scene_x, scene_y_true, split):
-    # obj_x = jnp.array(obj_x)
-    # scene_x = jnp.array(scene_x)
-    # scene_y_true = jnp.array(scene_y_true)
+    obj_x = jnp.array(obj_x)
+    scene_x = jnp.array(scene_x)
+    scene_y_true = jnp.array(scene_y_true)
     create_dir_if_required(os.path.join(opts.run_dir, 'debug_imgs'))
     y_pred = nn.sigmoid(test_step(params, nt_params, obj_x, scene_x).squeeze())
     anchors0 = list(map(to_pil_img, obj_x[0, 0]))
@@ -133,6 +147,8 @@ losses = []
 with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
     for step, (obj_x, scene_x, scene_y_true) in enumerate(jnp_arrayed(progress)):
 
+        wandb_to_log = {}
+
         params, nt_params, opt_state, loss = train_step(
             params, nt_params, opt_state,
             obj_x, scene_x, scene_y_true)
@@ -147,7 +163,10 @@ with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
                 f" metric {(metric_loss * opts.contrastive_loss_weight):0.5f}"
                 f" scene  {(scene_loss * opts.classifier_loss_weight):0.5f}")
 
-            losses.append((step, metric_loss, scene_loss))
+            if opts.use_wandb:
+                wandb_to_log['metric_loss'] = metric_loss
+                wandb_to_log['scene_loss'] = scene_loss
+                losses.append((step, metric_loss, scene_loss))
 
         if step % 1000 == 0:
             train_log_loss = mean_log_loss(
@@ -155,6 +174,10 @@ with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
             validation_log_loss = mean_log_loss(
                 params, nt_params, opts.eg_validate_root_dir, num_egs=100)
             print("log_loss", step, 'train', train_log_loss, 'validate', validation_log_loss)
+
+            if opts.use_wandb:
+                wandb_to_log['train_log_loss'] = train_log_loss
+                wandb_to_log['validation_log_loss'] = validation_log_loss
 
             # generate debug imgs for training with most recent batch
             generate_debug_imgs(step, obj_x, scene_x, scene_y_true, split='train')
@@ -170,6 +193,10 @@ with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
             # flush losses
             with open(os.path.join(opts.run_dir, 'losses.json'), 'w') as f:
                 json.dump(losses, f)
+
+        if len(wandb_to_log) > 0:
+            wandb.log(step=step, data=wandb_to_log)
+
 
 
 
