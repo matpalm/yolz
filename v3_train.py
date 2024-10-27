@@ -51,8 +51,29 @@ parser.add_argument('--stop-anchor-gradient', action='store_true')
 parser.add_argument('--contrastive-loss-weight', type=float, default=1.0)
 parser.add_argument('--classifier-loss-weight', type=float, default=100.0)
 parser.add_argument('--use-wandb', action='store_true')
+parser.add_argument('--embedding-dim', type=int, default=None)
+parser.add_argument('--feature-dim', type=int, default=None)
+
 opts = parser.parse_args()
 print("opts", opts)
+
+if (opts.eg_obj_ids_json is None) or (opts.eg_obj_ids_json == ''):
+    obj_ids = None
+else:
+    obj_ids = json.loads(opts.eg_obj_ids_json)
+
+# load base model config
+with open(opts.models_config_json, 'r') as f:
+    models_config = json.load(f)
+print('base models_config', models_config)
+
+# clobber with any specifically set flags
+if opts.embedding_dim is not None:
+    models_config['embedding']['embedding_dim'] = opts.embedding_dim
+    models_config['scene']['expected_obj_embedding_dim'] = opts.embedding_dim  # clumsy
+if opts.feature_dim is not None:
+    models_config['scene']['feature_dim'] = opts.feature_dim
+print('models_config with --flag updates', models_config)
 
 if opts.use_wandb:
     import wandb
@@ -63,15 +84,8 @@ if opts.use_wandb:
     wandb.config.stop_anchor_gradient=opts.stop_anchor_gradient
     wandb.config.contrastive_loss_weight = opts.contrastive_loss_weight
     wandb.config.classifier_loss_weight = opts.classifier_loss_weight
-
-if (opts.eg_obj_ids_json is None) or (opts.eg_obj_ids_json == ''):
-    obj_ids = None
-else:
-    obj_ids = json.loads(opts.eg_obj_ids_json)
-
-with open(opts.models_config_json, 'r') as f:
-    models_config = json.load(f)
-print('models_config', models_config)
+    wandb.config.embedding_dim = models_config['embedding']['embedding_dim']
+    wandb.config.feature_dim = models_config['scene']['feature_dim']
 
 # create model and extract initial params
 yolz = Yolz(
@@ -168,7 +182,7 @@ with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
                 wandb_to_log['scene_loss'] = scene_loss
                 losses.append((step, metric_loss, scene_loss))
 
-        if step % 1000 == 0:
+        if step % 500 == 0:
             train_log_loss = mean_log_loss(
                 params, nt_params, opts.eg_train_root_dir, num_egs=100)
             validation_log_loss = mean_log_loss(
