@@ -15,11 +15,10 @@ from util import to_pil_img, smooth_highlight, highlight, collage, create_dir_if
 import numpy as np
 np.set_printoptions(precision=5, threshold=10000, suppress=True, linewidth=10000)
 
-# from jaxopt
-from jax.nn import softplus
-def binary_logistic_loss(label: int, logit: float) -> float:
-  return softplus(jnp.where(label, -logit, logit))
-
+# # from jaxopt
+# from jax.nn import softplus
+# def binary_logistic_loss(label: int, logit: float) -> float:
+#   return softplus(jnp.where(label, -logit, logit))
 
 import argparse
 parser = argparse.ArgumentParser(
@@ -36,6 +35,8 @@ parser.add_argument('--num-focus-objs', type=int, default=32,
                         ' the number of examples.')
 parser.add_argument('--models-config-json', type=str, required=True,
                     help='embedding model config json file')
+parser.add_argument('--initial-weights-pkl', type=str, default=None,
+                    help='starting weights')
 parser.add_argument('--eg-train-root-dir', type=str,
                     default='data/train/reference_patches',
                     help='.')
@@ -98,7 +99,7 @@ if opts.use_wandb:
 # create model and extract initial params
 yolz = Yolz(
     models_config,
-    initial_weights_pkl=None,
+    initial_weights_pkl=opts.initial_weights_pkl,
     stop_anchor_gradient=opts.stop_anchor_gradient,
     contrastive_loss_weight=opts.contrastive_loss_weight,
     classifier_loss_weight=opts.classifier_loss_weight,

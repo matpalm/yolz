@@ -15,7 +15,7 @@ for A in 0.25 0.5 0.75; do
      --contrastive-loss-weight 1 \
      --classifier-loss-weight 10 \
      --focal-loss-alpha $A \
-     --focal-loss-gamma $G \
+     --focal-loss-gamma $B \
      --use-wandb
     done
 done
