@@ -8,7 +8,6 @@
       "height_width": 640,
       "filter_sizes": [4, 8, 16, 32, 128, 128],
       "feature_dim": 64,
-      "expected_obj_embedding_dim": 64,
       "classifier_filter_sizes": [64, 64],
       "init_classifier_bias": -5
     }

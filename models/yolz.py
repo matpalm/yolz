@@ -19,7 +19,13 @@ class Yolz(object):
                  initial_weights_pkl: str=None,
                  stop_anchor_gradient: bool=False,
                  contrastive_loss_weight: int=1,
-                 classifier_loss_weight: int=100):
+                 classifier_loss_weight: int=100,
+                 focal_loss_alpha: float=0.5,
+                 focal_loss_gamma: float=2.0):
+
+        # clumsy
+        models_config['scene']['expected_obj_embedding_dim'] = \
+            models_config['embedding']['embedding_dim']
 
         self.embedding_model = construct_embedding_model(**models_config['embedding'])
         self.scene_model = construct_scene_model(**models_config['scene'])
@@ -31,6 +37,8 @@ class Yolz(object):
         self.stop_anchor_gradient = stop_anchor_gradient
         self.contrastive_loss_weight = contrastive_loss_weight
         self.classifier_loss_weight = classifier_loss_weight
+        self.focal_loss_alpha = focal_loss_alpha
+        self.focal_loss_gamma = focal_loss_gamma
 
     def get_params(self):
         e_params = self.embedding_model.trainable_variables
@@ -121,9 +129,13 @@ class Yolz(object):
         metric_loss = jnp.mean(metric_losses)
 
         # calculate classifier loss is binary cross entropy ( mean across all instances )
-        scene_losses = optax.losses.sigmoid_binary_cross_entropy(
+#        scene_losses = optax.losses.sigmoid_binary_cross_entropy(
+        scene_losses = optax.losses.sigmoid_focal_loss(
             logits=classifier_logits.flatten(),
-            labels=scene_y_true.flatten())
+            labels=scene_y_true.flatten(),
+            alpha=self.focal_loss_alpha,  # how much we weight loss for positives ( vs negatives )
+            gamma=self.focal_loss_gamma
+            )
         scene_loss = jnp.mean(scene_losses)
 
         # return losses ( with nt_params updated from forward call )

@@ -45,14 +45,18 @@ parser.add_argument('--eg-validate-root-dir', type=str,
 parser.add_argument('--eg-obj-ids-json', type=str, default=None,
                     help='ids to use, json str. if None use all'
                          ' entries from --eg-root-dir')
+parser.add_argument('--optimiser', type=str, default='adam')
 parser.add_argument('--learning-rate', type=float, default=1e-3,
                     help='adam learning rate')
 parser.add_argument('--stop-anchor-gradient', action='store_true')
 parser.add_argument('--contrastive-loss-weight', type=float, default=1.0)
 parser.add_argument('--classifier-loss-weight', type=float, default=100.0)
+parser.add_argument('--focal-loss-alpha', type=float, default=0.5)
+parser.add_argument('--focal-loss-gamma', type=float, default=2.0)
 parser.add_argument('--use-wandb', action='store_true')
 parser.add_argument('--embedding-dim', type=int, default=None)
 parser.add_argument('--feature-dim', type=int, default=None)
+parser.add_argument('--init-classifier-bias', type=float, default=-5)
 parser.add_argument('--seed', type=int, default=123)
 parser.add_argument('--test-threshold', type=float, default=0.1,
                     help='threshold to use during validation for P/R/F1 calcs')
@@ -76,6 +80,8 @@ if opts.embedding_dim is not None:
     models_config['scene']['expected_obj_embedding_dim'] = opts.embedding_dim  # clumsy
 if opts.feature_dim is not None:
     models_config['scene']['feature_dim'] = opts.feature_dim
+if opts.init_classifier_bias is not None:
+    models_config['scene']['init_classifier_bias'] = opts.init_classifier_bias
 print('models_config with --flag updates', models_config)
 
 if opts.use_wandb:
@@ -83,13 +89,11 @@ if opts.use_wandb:
     wandb.init(project='yolz',
                 name=opts.run_dir,
                 reinit=True)
-    wandb.config.learning_rate=opts.learning_rate
-    wandb.config.stop_anchor_gradient=opts.stop_anchor_gradient
-    wandb.config.contrastive_loss_weight = opts.contrastive_loss_weight
-    wandb.config.classifier_loss_weight = opts.classifier_loss_weight
-    wandb.config.embedding_dim = models_config['embedding']['embedding_dim']
-    wandb.config.feature_dim = models_config['scene']['feature_dim']
-    wandb.config.seed = opts.seed
+    config = vars(opts)
+    config['embedding_dim'] = models_config['embedding']['embedding_dim']
+    config['feature_dim'] = models_config['scene']['feature_dim']
+    for k, v in config.items():
+        wandb.config[k] = v
 
 # create model and extract initial params
 yolz = Yolz(
@@ -97,7 +101,10 @@ yolz = Yolz(
     initial_weights_pkl=None,
     stop_anchor_gradient=opts.stop_anchor_gradient,
     contrastive_loss_weight=opts.contrastive_loss_weight,
-    classifier_loss_weight=opts.classifier_loss_weight)
+    classifier_loss_weight=opts.classifier_loss_weight,
+    focal_loss_alpha=opts.focal_loss_alpha,
+    focal_loss_gamma=opts.focal_loss_gamma
+    )
 params, nt_params = yolz.get_params()
 
 # datasets
@@ -111,7 +118,15 @@ validate_ds = construct_datasets(
     opts.seed)
 
 # set up training step & optimiser
-opt = optax.adam(learning_rate=opts.learning_rate)
+if opts.optimiser == 'adam':
+    opt = optax.adam(learning_rate=opts.learning_rate)
+elif opts.optimiser == 'adamw':
+    opt = optax.adamw(learning_rate=opts.learning_rate)
+elif opts.optimiser == 'sgd':
+    opt = optax.sgd(learning_rate=opts.learning_rate, momentum=0.9)
+else:
+    raise Exception(f"unsupported --optimiser {opts.optimiser}")
+
 opt_state = opt.init(params)
 def train_step(
     params, nt_params, opt_state,
