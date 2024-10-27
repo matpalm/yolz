@@ -6,7 +6,7 @@ import json, tqdm
 import jax.numpy as jnp
 from jax import jit, nn
 import optax
-
+from sklearn.metrics import average_precision_score, recall_score, precision_score, f1_score
 
 from data import construct_datasets, jnp_arrayed
 from models.yolz import Yolz
@@ -53,6 +53,9 @@ parser.add_argument('--classifier-loss-weight', type=float, default=100.0)
 parser.add_argument('--use-wandb', action='store_true')
 parser.add_argument('--embedding-dim', type=int, default=None)
 parser.add_argument('--feature-dim', type=int, default=None)
+parser.add_argument('--seed', type=int, default=123)
+parser.add_argument('--test-threshold', type=float, default=0.1,
+                    help='threshold to use during validation for P/R/F1 calcs')
 
 opts = parser.parse_args()
 print("opts", opts)
@@ -86,6 +89,7 @@ if opts.use_wandb:
     wandb.config.classifier_loss_weight = opts.classifier_loss_weight
     wandb.config.embedding_dim = models_config['embedding']['embedding_dim']
     wandb.config.feature_dim = models_config['scene']['feature_dim']
+    wandb.config.seed = opts.seed
 
 # create model and extract initial params
 yolz = Yolz(
@@ -99,10 +103,12 @@ params, nt_params = yolz.get_params()
 # datasets
 train_ds = construct_datasets(
     opts.eg_train_root_dir, opts.num_batches,
-    obj_ids, yolz.classifier_spatial_size(), opts)
+    obj_ids, yolz.classifier_spatial_size(), opts,
+    opts.seed)
 validate_ds = construct_datasets(
     opts.eg_validate_root_dir, opts.num_batches,
-    obj_ids, yolz.classifier_spatial_size(), opts)
+    obj_ids, yolz.classifier_spatial_size(), opts,
+    opts.seed)
 
 # set up training step & optimiser
 opt = optax.adam(learning_rate=opts.learning_rate)
@@ -145,17 +151,41 @@ def generate_debug_imgs(step, obj_x, scene_x, scene_y_true, split):
     smooth_highlight(scene0, y_pred[0]).save(
         os.path.join(opts.run_dir, 'debug_imgs', f"s{step:06d}_{split}_y_pred.png"))
 
-def mean_log_loss(params, nt_params, root_dir, num_egs):
+# def mean_log_loss(params, nt_params, root_dir, num_egs):
+#     ds_for_log_loss = construct_datasets(
+#         root_dir, num_egs,
+#         obj_ids, yolz.classifier_spatial_size(), opts)
+#     losses = []
+#     for obj_x, scene_x, scene_y_true in jnp_arrayed(ds_for_log_loss):
+#         y_true = scene_y_true.flatten()
+#         y_pred_logits = test_step(params, nt_params, obj_x, scene_x).flatten()
+#         log_loss = jnp.mean(binary_logistic_loss(y_true, y_pred_logits))
+#         losses.append(float(log_loss))
+#     return np.mean(losses)
+
+
+def stats(params, nt_params, root_dir, num_egs):
     ds_for_log_loss = construct_datasets(
         root_dir, num_egs,
         obj_ids, yolz.classifier_spatial_size(), opts)
-    losses = []
+    y_true_all = []
+    y_pred_all = []
     for obj_x, scene_x, scene_y_true in jnp_arrayed(ds_for_log_loss):
         y_true = scene_y_true.flatten()
         y_pred_logits = test_step(params, nt_params, obj_x, scene_x).flatten()
-        log_loss = jnp.mean(binary_logistic_loss(y_true, y_pred_logits))
-        losses.append(float(log_loss))
-    return np.mean(losses)
+        y_pred = nn.sigmoid(y_pred_logits)
+        y_pred = (y_pred > opts.test_threshold).astype(float)
+        y_true_all.append(y_true)
+        y_pred_all.append(y_pred)
+    y_true_all = np.concatenate(y_true_all)
+    y_pred_all = np.concatenate(y_pred_all)
+
+    return {
+        'ap': average_precision_score(y_true_all, y_pred_all),
+        'p': precision_score(y_true_all, y_pred_all),
+        'r': recall_score(y_true_all, y_pred_all),
+        'f1': f1_score(y_true_all, y_pred_all)
+        }
 
 losses = []
 with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
@@ -183,15 +213,15 @@ with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
                 losses.append((step, metric_loss, scene_loss))
 
         if step % 500 == 0:
-            train_log_loss = mean_log_loss(
+            train_stats = stats(
                 params, nt_params, opts.eg_train_root_dir, num_egs=100)
-            validation_log_loss = mean_log_loss(
+            validation_stats = stats(
                 params, nt_params, opts.eg_validate_root_dir, num_egs=100)
-            print("log_loss", step, 'train', train_log_loss, 'validate', validation_log_loss)
+            print("STATS", step, 'train', train_stats, 'validate', validation_stats)
 
             if opts.use_wandb:
-                wandb_to_log['train_log_loss'] = train_log_loss
-                wandb_to_log['validation_log_loss'] = validation_log_loss
+                wandb_to_log['train_stats'] = train_stats
+                wandb_to_log['validation_stats'] = validation_stats
 
             # generate debug imgs for training with most recent batch
             generate_debug_imgs(step, obj_x, scene_x, scene_y_true, split='train')

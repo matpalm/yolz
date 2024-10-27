@@ -259,11 +259,12 @@ class SceneExamples(object):
         # dataset will return num_batches instances of (C, HW, HW, 3)
         return ds
 
-def construct_datasets(root_dir, num_batches, obj_ids, classifier_spatial_w, opts):
+def construct_datasets(root_dir, num_batches, obj_ids, classifier_spatial_w, opts,
+                       seed=123):
     obj_ids_helper = ObjIdsHelper(
         root_dir=root_dir,
         obj_ids=obj_ids,
-        seed=123
+        seed=seed
     )
     obj_egs = ContrastiveExamples(obj_ids_helper)
     obj_ds = obj_egs.dataset(num_batches=num_batches,
@@ -274,7 +275,7 @@ def construct_datasets(root_dir, num_batches, obj_ids, classifier_spatial_w, opt
         grid_size=classifier_spatial_w,
         num_other_objs=4,
         instances_per_obj=3,
-        seed=123)
+        seed=seed)
     scene_ds = scene_egs.dataset(
         num_batches=num_batches,
         num_focus_objects=opts.num_focus_objs)

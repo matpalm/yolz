@@ -12,7 +12,9 @@ time python3 v3_test.py \
  --num-batches 100 \
  --models-config-json runs/$R/models_config.json \
  --num-obj-references 8 \
- --num-focus-objs 8
+ --num-focus-objs 8 \
+ --embedding-dim 64 \
+ --feature-dim 64 \
 
  #--learning-rate 1e-4 \
  #--contrastive-loss-weight 1 \

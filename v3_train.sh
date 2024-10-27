@@ -2,10 +2,7 @@ set -ex
 
 export R=`dts`
 mkdir runs/$R
-
 cp models_config_eg.json runs/$R/models_config.json
-jq . < runs/$R/models_config.json
-
 time python3 v3_train.py \
  --run-dir runs/$R \
  --models-config-json runs/$R/models_config.json \
