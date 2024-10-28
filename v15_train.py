@@ -8,8 +8,8 @@ from jax import vmap, jit, value_and_grad, nn
 
 import optax
 
-from data import ObjIdsHelper, ContrastiveExamples
-from models.models import construct_embedding_model
+from data import construct_datasets, jnp_arrayed
+from models.yolz import Yolz
 import util
 
 import numpy as np
@@ -18,14 +18,16 @@ np.set_printoptions(precision=5, threshold=10000, suppress=True, linewidth=10000
 import argparse
 parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('--run-dir', type=str, required=True,
+                    help='where to store weights, losses.json, examples etc')
 parser.add_argument('--num-batches', type=int, default=100,
                     help='effective epoch length')
 parser.add_argument('--num-obj-references', type=int, default=16,
                     help='(N). number of reference samples for each instance in C')
-parser.add_argument('--num-contrastive-examples', type=int, default=32,
+parser.add_argument('--num-focus-objs', type=int, default=32,
                     help='(C). inner batch size, 2x for a,p pair.'
                          ' if None, use |--eg-obj-ids-json|')
-parser.add_argument('--model-config-json', type=str, required=True,
+parser.add_argument('--models-config-json', type=str, required=True,
                     help='embedding model config json file')
 parser.add_argument('--eg-root-dir', type=str,
                     default='data/train/reference_patches',
@@ -39,6 +41,7 @@ parser.add_argument('--weights-pkl', type=str, default=None,
                     help='where to save final weights')
 parser.add_argument('--losses-json', type=str, default=None,
                     help='where to write json list of losses')
+parser.add_argument('--seed', type=int, default=123)
 opts = parser.parse_args()
 print("opts", opts)
 
@@ -47,115 +50,67 @@ if (opts.eg_obj_ids_json is None) or (opts.eg_obj_ids_json == ''):
 else:
     obj_ids = json.loads(opts.eg_obj_ids_json)
 
-with open(opts.model_config_json, 'r') as f:
-    model_config = json.load(f)
-print('model_config', model_config)
-embedding_dim = model_config['embedding_dim']
+# load base model config
+with open(opts.models_config_json, 'r') as f:
+    models_config = json.load(f)
+print('base models_config', models_config)
 
-obj_ids_helper = ObjIdsHelper(
-    root_dir=opts.eg_root_dir,
-    obj_ids=obj_ids,
-    seed=123
-)
+# create model and extract initial params
+yolz = Yolz(
+    models_config,
+    initial_weights_pkl=None,
+    stop_anchor_gradient=True,
+    contrastive_loss_weight=1,
+    classifier_loss_weight=0,  # back port to classifier=0 ignore for v1.5
+    )
+params, nt_params = yolz.get_params()
 
-c_egs = ContrastiveExamples(obj_ids_helper)  # (C, 2, N, HW, HW, 3)
+# datasets
+dataset = construct_datasets(
+    opts.eg_root_dir, opts.num_batches,
+    obj_ids, yolz.classifier_spatial_size(), opts,
+    opts.seed)
 
-dataset = c_egs.dataset(
-    num_batches=opts.num_batches,                            # B
-    num_obj_references=opts.num_obj_references,              # N
-    num_contrastive_examples=opts.num_contrastive_examples)  # C
-
-embedding_model = construct_embedding_model(**model_config)
-print(embedding_model.summary())
-
-def mean_embeddings(params, nt_params, x):
-    # x (N, H, W, 3)
-    embeddings, nt_params = embedding_model.stateless_call(
-        params, nt_params, x, training=True)  # (N, E)
-    # average over N
-    embeddings = jnp.mean(embeddings, axis=0)  # (E)
-    # (re) L2 normalise
-    embeddings /= jnp.linalg.norm(embeddings, axis=-1, keepdims=True)
-    return embeddings, nt_params
-
-# def focal_loss(logits, alpha, gamma):
-#     # TODO: would this be correct? ( and is it even worth using? )
-#     # re: https://discuss.pytorch.org/t/focal-loss-for-imbalanced-multi-class-classification-in-pytorch/61289/2
-#     xent_losses = nn.log_softmax(logits)
-#     pt = jnp.exp(-xent_loss)
-#     focal_losses = (alpha * (1 - pt) ** gamma) * xent_losses
-#     return jnp.mean(focal_losses)
-
-def main_diagonal_softmax_cross_entropy(logits):
-    # cross entropy assuming "labels" are just (0, 1, 2, ...) i.e. where
-    # one_hot mask for log_softmax ends up just being the main diagonal
-    return -jnp.sum(jnp.diag(nn.log_softmax(logits)))
-
-def contrastive_loss(params, nt_params, x):
-    # x (C, 2, N, H, W, 3)
-
-    # flatten anchors and positives in x
-    nhwc = x.shape[-4:]
-    x = x.reshape((-1, *nhwc))  # (2C, N, H, W, C)
-    # run embeddings
-    # note: vmapped mean_embeddings => need to reduce nt_params
-    embeddings, nt_params = vmap(mean_embeddings, in_axes=(None, None, 0))(
-        params, nt_params, x)  # (2C, E)
-    nt_params = [jnp.mean(p, axis=0) for p in nt_params]
-    # restore C, 2 axis in embeddings and slice out ancs and positives
-    embeddings = embeddings.reshape((-1, 2, embedding_dim))  # (C, 2, E)
-    anchors = embeddings[:, 0]
-    positives = embeddings[:, 1]
-    # calculate contrastive loss
-    gram_ish_matrix = jnp.einsum('ae,be->ab', anchors, positives)
-    metric_loss = main_diagonal_softmax_cross_entropy(logits=gram_ish_matrix)
-    return jnp.mean(metric_loss), nt_params
-
-def calculate_gradients(params, nt_params, x):
-    # x (C, 2, N, H, W, 3)
-    grad_fn = value_and_grad(contrastive_loss, has_aux=True)
-    (loss, nt_params), grads = grad_fn(params, nt_params, x)
-    return (loss, nt_params), grads
-
+# set up training step & optimiser
 opt = optax.adam(learning_rate=opts.learning_rate)
 
-@jit
-def train_step(params, nt_params, opt_state, x):
-    (loss, nt_params), grads = calculate_gradients(params, nt_params, x)
+opt_state = opt.init(params)
+def train_step(
+    params, nt_params, opt_state,
+    obj_x, scene_x, scene_y_true):
+    # calculate gradients
+    (loss, nt_params), grads = yolz.calculate_gradients(
+        params, nt_params, obj_x, scene_x, scene_y_true)
+    # calculate updates from optimiser
     updates, opt_state = opt.update(grads, opt_state, params)
+    # apply updates to get new params
     params = optax.apply_updates(params, updates)
+    # return
     return params, nt_params, opt_state, loss
 
-params = embedding_model.trainable_variables
-nt_params = embedding_model.non_trainable_variables
-opt_state = opt.init(params)
+# compile various utils
+train_step = jit(train_step)
+calculate_individual_losses = jit(yolz.calculate_individual_losses)
 
 losses = []
-
-
 with tqdm.tqdm(dataset, total=opts.num_batches) as progress:
-    for e, (x, _y) in enumerate(progress):
-        x = jnp.array(x)  # (C, 2, N, H, W, 3)
-        if e == 0:
-            print("x", "(C, 2, N, W, H, 3)", x.shape)
-        params, nt_params, opt_state, loss = train_step(params, nt_params, opt_state, x)
-        losses.append(float(loss))
-        if e % 50 == 0:
-            progress.set_description(f"loss {loss}")
+    for step, (obj_x, scene_x, scene_y_true) in enumerate(jnp_arrayed(progress)):
 
-# set values back in model
-for variable, value in zip(embedding_model.trainable_variables, params):
-    variable.assign(value)
-for variable, value in zip(embedding_model.non_trainable_variables, nt_params):
-    variable.assign(value)
+        params, nt_params, opt_state, loss = train_step(
+            params, nt_params, opt_state,
+            obj_x, scene_x, scene_y_true)
 
-# write weights as pickle
-import pickle
-if opts.weights_pkl is not None:
-    with open(opts.weights_pkl, 'wb') as f:
-        pickle.dump(embedding_model.get_weights(), f)
+        if step % 10 == 0:
+            metric_loss, scene_loss, _ = calculate_individual_losses(
+                params, nt_params, obj_x, scene_x, scene_y_true)
+            metric_loss, scene_loss = map(float, (metric_loss, scene_loss))
 
-# write losses
-if opts.losses_json is not None:
-    with open(opts.losses_json, 'w') as f:
-        json.dump(losses, f)
+            progress.set_description(
+                f"step {step} losses (weighted)"
+                f" metric {metric_loss} scene {scene_loss}")
+
+        if step % 500 == 0:
+
+            # write latest weights
+            yolz.write_weights(params, nt_params,
+                               os.path.join(opts.run_dir, 'models_weights.pkl'))

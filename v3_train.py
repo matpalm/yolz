@@ -23,7 +23,7 @@ np.set_printoptions(precision=5, threshold=10000, suppress=True, linewidth=10000
 import argparse
 parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--run-dir', type=str, default=100,
+parser.add_argument('--run-dir', type=str, required=True,
                     help='where to store weights, losses.json, examples etc')
 parser.add_argument('--num-batches', type=int, default=100,
                     help='effective epoch length')

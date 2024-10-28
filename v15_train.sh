@@ -2,24 +2,24 @@ set -ex
 
 export R=`dts`
 mkdir runs/$R
-echo '{"height_width":64, "filter_sizes":[16,32,64,256], "embedding_dim":128}' \
- > runs/$R/embedding_config.json
-
+cp models_config_eg.json runs/$R/models_config.json
 time python3 v15_train.py \
- --model-config runs/$R/embedding_config.json \
- --num-batches 2000 \
+ --run-dir runs/$R \
+ --models-config-json runs/$R/models_config.json \
+ --num-batches 1000 \
  --learning-rate 1e-4 \
  --num-obj-references 8 \
- --num-contrastive-examples 16 \
- --weights-pkl runs/$R/weights.pkl \
+ --num-focus-objs 8 \
  --losses-json runs/$R/losses.json
  # ~2min for 5000 batches
 
-python3 plot_losses.py --losses-json runs/$R/losses.json
+#python3 plot_losses.py --losses-json runs/$R/losses.json
+
+find data/test/reference_patches/ -type f > test.reference_patches.manifest
 
 time python3 embed.py \
- --model-config-json runs/$R/embedding_config.json \
- --weights-pkl runs/$R/weights.pkl \
+ --models-config-json runs/$R/models_config.json \
+ --weights-pkl runs/$R/models_weights.pkl \
  --manifest test.reference_patches.manifest \
  --embeddings-npy runs/$R/test.reference_patches.npy
 

@@ -95,8 +95,8 @@ class Yolz(object):
 
         # reshape back to split anchors and positives
         obj_embeddings = obj_embeddings.reshape((C, 2, -1))  # (C, 2, E)
-        anchors = obj_embeddings[:,0]
-        positives = obj_embeddings[:,1]
+        anchors = obj_embeddings[:, 0]
+        positives = obj_embeddings[:, 1]
 
         # second; run scene branch runs ( with just anchors for obj references )
 

@@ -15,7 +15,7 @@ np.set_printoptions(precision=5, threshold=10000, suppress=True, linewidth=10000
 import argparse
 parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--model-config-json', type=str, required=True,
+parser.add_argument('--models-config-json', type=str, required=True,
                     help='embedding model config json file')
 parser.add_argument('--weights-pkl', type=str, required=True)
 parser.add_argument('--manifest', type=str, required=True)
@@ -25,13 +25,13 @@ opts = parser.parse_args()
 print("opts", opts)
 
 # create model, load weights and jit embedding function
-with open(opts.model_config_json, 'r') as f:
-    model_config = json.load(f)
-embedding_model = construct_embedding_model(**model_config)
+with open(opts.models_config_json, 'r') as f:
+    models_config = json.load(f)
+embedding_model = construct_embedding_model(**models_config['embedding'])
 
 with open(opts.weights_pkl, 'rb') as f:
-    reloaded_weights = pickle.load(f)
-embedding_model.set_weights(reloaded_weights)
+    e_weights, _s_weights = pickle.load(f)
+embedding_model.set_weights(e_weights)
 
 @jit
 def embed(b):

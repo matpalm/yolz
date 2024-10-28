@@ -19,7 +19,7 @@ time python3 v3_train.py \
 
 
 
- # ~2min for 5000 batches
+# ~2min for 5000 batches
 
 #--stop-anchor-gradient \
 
