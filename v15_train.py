@@ -78,6 +78,14 @@ def mean_embeddings(params, nt_params, x):
     embeddings /= jnp.linalg.norm(embeddings, axis=-1, keepdims=True)
     return embeddings, nt_params
 
+# def focal_loss(logits, alpha, gamma):
+#     # TODO: would this be correct? ( and is it even worth using? )
+#     # re: https://discuss.pytorch.org/t/focal-loss-for-imbalanced-multi-class-classification-in-pytorch/61289/2
+#     xent_losses = nn.log_softmax(logits)
+#     pt = jnp.exp(-xent_loss)
+#     focal_losses = (alpha * (1 - pt) ** gamma) * xent_losses
+#     return jnp.mean(focal_losses)
+
 def main_diagonal_softmax_cross_entropy(logits):
     # cross entropy assuming "labels" are just (0, 1, 2, ...) i.e. where
     # one_hot mask for log_softmax ends up just being the main diagonal
