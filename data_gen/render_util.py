@@ -2,7 +2,7 @@ import pybullet as p
 from PIL import Image
 import numpy as np
 
-def render(hw: int):
+def render(hw: int, include_alpha: bool=False):
 
     proj_matrix = p.computeProjectionMatrixFOV(fov=50,
                                                 aspect=float(hw) / hw,
@@ -24,10 +24,19 @@ def render(hw: int):
                                  shadow=1,
                                  renderer=p.ER_BULLET_HARDWARE_OPENGL)  # shadows are noisy in OPENGL (?)
 
+    # note: render is 4 channel, but doesn't include alpha :/
     render_rgba = rendering[2]
     rgba_array = np.array(render_rgba, dtype=np.uint8)
     rgb_array = rgba_array[:, :, :3]
-    return Image.fromarray(rgb_array)
+    img = Image.fromarray(rgb_array, 'RGB')
+    if not include_alpha:
+        return img
+
+    render_segmentation = rendering[4]
+    alpha = np.where(render_segmentation==-1, 0, 255)
+    alpha = Image.fromarray(alpha.astype(np.uint8), mode='L')
+    img.putalpha(alpha)
+    return img
 
 # below is all the stuff related to bounding box we don't use yet...
 

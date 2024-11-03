@@ -22,6 +22,7 @@ parser.add_argument('--urdf-id-to', type=int, default=None,
                     help='if set, generate to this urdf-id (exclusive)')
 parser.add_argument('--render-width-height', type=int, default=64)
 parser.add_argument('--render-fov', type=int, default=70)
+parser.add_argument('--include-alpha', action='store_true')
 parser.add_argument('--num-examples', type=int, default=10,
                     help='num examples to generate per urdf')
 parser.add_argument('--output-dir', type=str, required=True)
@@ -57,7 +58,7 @@ for urdf_id in tqdm(urdf_ids):
                             basePosition=obj_pos, baseOrientation=obj_orient,
                             globalScaling=1)
 
-        img = render(opts.render_width_height)
+        img = render(opts.render_width_height, opts.include_alpha)
         img.save(os.path.join(output_dir, f"{i:04d}.png"))
 
         p.removeBody(obj_uid)
