@@ -138,7 +138,7 @@ class ContrastiveExamples(object):
         ds = ds.batch(num_contrastive_examples)
 
         # dataset will return num_batches examples
-        return ds
+        return ds.prefetch(1)
 
 class SceneExamples(object):
 
@@ -257,7 +257,7 @@ class SceneExamples(object):
         ds = ds.batch(num_focus_objects)
 
         # dataset will return num_batches instances of (C, HW, HW, 3)
-        return ds
+        return ds.prefetch(1)
 
 def construct_datasets(root_dir, num_batches, obj_ids, classifier_spatial_w, opts,
                        seed=123):
