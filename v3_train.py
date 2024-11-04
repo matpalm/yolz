@@ -112,11 +112,13 @@ params, nt_params = yolz.get_params()
 train_ds = construct_datasets(
     opts.eg_train_root_dir, opts.num_batches,
     obj_ids, yolz.classifier_spatial_size(), opts,
-    opts.seed)
+    random_background_colours=True,
+    seed=opts.seed)
 validate_ds = construct_datasets(
     opts.eg_validate_root_dir, opts.num_batches,
     obj_ids, yolz.classifier_spatial_size(), opts,
-    opts.seed)
+    random_background_colours=False,
+    seed=opts.seed)
 
 # set up training step & optimiser
 if opts.optimiser == 'adam':
@@ -180,10 +182,11 @@ def generate_debug_imgs(step, obj_x, scene_x, scene_y_true, split):
 #     return np.mean(losses)
 
 
-def stats(params, nt_params, root_dir, num_egs):
+def stats(params, nt_params, root_dir: str, num_egs: int, random_background_colours: bool):
     ds_for_log_loss = construct_datasets(
         root_dir, num_egs,
-        obj_ids, yolz.classifier_spatial_size(), opts)
+        obj_ids, yolz.classifier_spatial_size(), opts,
+        random_background_colours=random_background_colours)
     y_true_all = []
     y_pred_all = []
     for obj_x, scene_x, scene_y_true in jnp_arrayed(ds_for_log_loss):
@@ -213,7 +216,8 @@ with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
             params, nt_params, opt_state,
             obj_x, scene_x, scene_y_true)
 
-        if step % 10 == 0:
+        if step % 1000 == 0:
+
             metric_loss, scene_loss, _ = calculate_individual_losses(
                 params, nt_params, obj_x, scene_x, scene_y_true)
             metric_loss, scene_loss = map(float, (metric_loss, scene_loss))
@@ -228,15 +232,23 @@ with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
                 wandb_to_log['scene_loss'] = scene_loss
                 losses.append((step, metric_loss, scene_loss))
 
-        if step % 500 == 0:
-            train_stats = stats(
-                params, nt_params, opts.eg_train_root_dir, num_egs=100)
+            train_with_rnd_background_stats = stats(
+                params, nt_params, opts.eg_train_root_dir, num_egs=100,
+                random_background_colours=True)
+            train_without_rnd_background_stats = stats(
+                params, nt_params, opts.eg_train_root_dir, num_egs=100,
+                random_background_colours=False)
             validation_stats = stats(
-                params, nt_params, opts.eg_validate_root_dir, num_egs=100)
-            print("STATS", step, 'train', train_stats, 'validate', validation_stats)
+                params, nt_params, opts.eg_validate_root_dir, num_egs=100,
+                random_background_colours=False)
+            print("STATS", step,
+                  'train_rng_background_stats', train_with_rnd_background_stats,
+                  'train_without_rnd_background_stats', train_without_rnd_background_stats,
+                  'validate', validation_stats)
 
             if opts.use_wandb:
-                wandb_to_log['train_stats'] = train_stats
+                wandb_to_log['train_rng_background_stats'] = train_with_rnd_background_stats
+                wandb_to_log['train_stats'] = train_without_rnd_background_stats
                 wandb_to_log['validation_stats'] = validation_stats
 
             # generate debug imgs for training with most recent batch

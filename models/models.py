@@ -99,6 +99,10 @@ def construct_scene_model(
     tiled_obj_embeddings = Tiling(grid_size, name='tiled_obj_emb')(obj_embedding_input)
 
     # combine the two sets of features
+    if scene_features.shape != tiled_obj_embeddings.shape:
+        raise Exception(f"scene_features [{scene_features.shape}",
+                        f" doesn't match shape of tiled_obj_embeddings [{tiled_obj_embeddings.shape}",
+                        f" possibly because spatial reduction wrong in scene network?")
     obj_scene_features = Concatenate(axis=-1)([scene_features, tiled_obj_embeddings])
 
     # add classifier ( logits )

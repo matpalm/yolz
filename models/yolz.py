@@ -129,7 +129,6 @@ class Yolz(object):
         metric_loss = jnp.mean(metric_losses)
 
         # calculate classifier loss is binary cross entropy ( mean across all instances )
-#        scene_losses = optax.losses.sigmoid_binary_cross_entropy(
         scene_losses = optax.losses.sigmoid_focal_loss(
             logits=classifier_logits.flatten(),
             labels=scene_y_true.flatten(),

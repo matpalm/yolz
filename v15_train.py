@@ -69,7 +69,8 @@ params, nt_params = yolz.get_params()
 dataset = construct_datasets(
     opts.eg_root_dir, opts.num_batches,
     obj_ids, yolz.classifier_spatial_size(), opts,
-    opts.seed)
+    random_background_colours=False,  # anot in original v1.5
+    seed=opts.seed)
 
 # set up training step & optimiser
 opt = optax.adam(learning_rate=opts.learning_rate)

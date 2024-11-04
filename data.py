@@ -12,9 +12,15 @@ import jax.numpy as jnp
 def convert_dtype(pil_img):
     return np.array(pil_img, dtype=float) / 255
 
-def load_fname(fname):
+def load_fname(fname, background_colour=None):
     try:
-        return Image.open(fname.strip())
+        img = Image.open(fname.strip())
+        if background_colour is None:
+            # ensure alpha, if present, is removed
+            return img.convert('RGB')
+        background = Image.new('RGB', img.size, background_colour)
+        background.paste(img, (0, 0), img)
+        return background
     except AssertionError as ae:
         print("load_fname AssertionError?", str(ae))
         print('fname', fname)
@@ -45,10 +51,12 @@ class ObjIdsHelper(object):
     def __init__(self,
                  root_dir: str,
                  obj_ids: List[str],
+                 random_background_colours: bool,
                  seed: int
     ):
         self.root_dir = root_dir
         self.seed = seed
+        self.random_background_colours = random_background_colours
         self.rnd = random.Random(seed)
 
         if obj_ids is None:
@@ -70,6 +78,15 @@ class ObjIdsHelper(object):
             self.manifest[obj_id] = fnames
         fname = self.rnd.choice(self.manifest[obj_id])
         return os.path.join(self.root_dir, obj_id, fname)
+
+    def load(self, fname):
+        if self.random_background_colours:
+            r = self.rnd.randint(0, 255)
+            g = self.rnd.randint(0, 255)
+            b = self.rnd.randint(0, 255)
+            return load_fname(fname, background_colour=(r, g, b))
+        else:
+            return load_fname(fname)
 
     # def check_or_derive(self, num_objs):
     #     if num_objs is None:
@@ -96,14 +113,14 @@ class ContrastiveExamples(object):
                 label_idx = self.obj_ids_helper.label_str_to_idx[obj_id]
                 for _ in range(num_obj_references):    # N
                     anc_fname = self.obj_ids_helper.random_example_for(obj_id)
-                    anc_pil_img = load_fname(anc_fname)
+                    anc_pil_img = self.obj_ids_helper.load(anc_fname)
                     anc_img_a = convert_dtype(anc_pil_img)
                     yield anc_img_a, label_idx
                 # TODO: pos should be strictly different to anchors
                 #       at the moment this is just 2x num_obj_references examples
                 for _ in range(num_obj_references):    # N
                     pos_fname = self.obj_ids_helper.random_example_for(obj_id)
-                    pos_pil_img = load_fname(pos_fname)
+                    pos_pil_img = self.obj_ids_helper.load(pos_fname)
                     pos_img_a = convert_dtype(pos_pil_img)
                     yield pos_img_a, label_idx
 
@@ -260,10 +277,12 @@ class SceneExamples(object):
         return ds.prefetch(1)
 
 def construct_datasets(root_dir, num_batches, obj_ids, classifier_spatial_w, opts,
-                       seed=123):
+                       random_background_colours: bool, seed=123):
+
     obj_ids_helper = ObjIdsHelper(
         root_dir=root_dir,
         obj_ids=obj_ids,
+        random_background_colours=random_background_colours,
         seed=seed
     )
     obj_egs = ContrastiveExamples(obj_ids_helper)
@@ -295,12 +314,13 @@ if __name__ == '__main__':
         obj_ids=["061","135","182",  # x3 red
                  "111","153","198",  # x3 green
                  "000","017","019"], # x3 blue
+        random_background_colours=True,
         seed=123
     )
 
     # things that must match across dataset generators
     B = 2  # number of batches
-    C = 4  # number of contrastive & focus objects
+    C = 8  # number of contrastive & focus objects
 
     c_egs = ContrastiveExamples(obj_ids_helper)
     N = 3
@@ -343,9 +363,11 @@ if __name__ == '__main__':
         print("c_egs batch!", b, obj_x.shape, obj_y)
         for n in range(N):
             ancs_poss = obj_x[:,:,n]  # (C, 2, HW, HW, 3)
+            # for img generation transpose so 2 rows are anchors and positives
+            ancs_poss = ancs_poss.transpose((1,0,2,3,4)) # (2, C, HW, HW, 3)
             ancs_poss = np.reshape(ancs_poss, (-1, 64, 64, 3))  # (2C, HW, HW, 3)
             imgs = list(map(to_pil_img, ancs_poss))
-            collage(imgs, C, 2).save(f"data_egs/b{b}/c_egs.n{n}.png")
+            collage(imgs, 2, C).save(f"data_egs/b{b}/c_egs.n{n}.png")
 
         print("s_egs batch!", b, scene_x.shape, scene_y)
         for c in range(C):

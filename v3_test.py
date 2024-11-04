@@ -28,9 +28,6 @@ parser.add_argument('--num-focus-objs', type=int, default=32,
                         ' the number of examples.')
 parser.add_argument('--models-config-json', type=str, required=True,
                     help='embedding model config json file')
-# parser.add_argument('--eg-train-root-dir', type=str,
-#                     default='data/train/reference_patches',
-#                     help='.')
 parser.add_argument('--eg-validate-root-dir', type=str,
                     default='data/validate/reference_patches',
                     help='.')
@@ -78,7 +75,8 @@ yolz = Yolz(models_config,
 validate_ds = construct_datasets(
     opts.eg_validate_root_dir, 100,
     obj_ids, yolz.classifier_spatial_size(), opts,
-    opts.seed)
+    random_background_colours=False,
+    seed=opts.seed)
 
 @jit
 def test_step(obj_x, scene_x):
