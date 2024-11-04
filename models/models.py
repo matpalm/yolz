@@ -36,14 +36,20 @@ class L2Normalisation(Layer):
         norm = jnp.linalg.norm(x, axis=-1, keepdims=True)
         return x / norm
 
-class Tiling(Layer):
-    def __init__(self, grid_size, name):
+class Broadcast(Layer):
+
+    def __init__(self, scene_hwc, name):
         super().__init__(name=name)
-        self.grid_size = grid_size
+        self.scene_hwc = scene_hwc
+
     def call(self, x):
-        return jnp.tile(
-            x[:,None,None,:],
-            (1, self.grid_size, self.grid_size, 1))
+        # batch dim for self.scene_hwc will be None ( from time it was
+        # recorded ) so we need to determine the concrete value
+        batch_size = x.shape[0]
+        scene_shape_without_batch = self.scene_hwc[1:]
+        scene_shape = (batch_size, *scene_shape_without_batch)
+        print("Broadcasting x", x.shape, 'to shape', scene_shape)
+        return jnp.broadcast_to(x[:,None,None,:], scene_shape)
 
 def construct_embedding_model(
         height_width: int,
@@ -92,18 +98,18 @@ def construct_scene_model(
 
     # input branch from obj_embeddings
     obj_embedding_input = Input((expected_obj_embedding_dim,), name='obj_embedding_inp')
+    if obj_embedding_input.shape[-1] != feature_dim:
+        raise Exception("needed obj_embedding_input final dim to match feature_dim")
 
-    # tile the embeddings to match the spatial size of the features
+    # broadcast the embeddings to match the spatial size of the features
     # from the scene backbone
-    grid_size = scene_features.shape[-2]  # assume square, dangerous?
-    tiled_obj_embeddings = Tiling(grid_size, name='tiled_obj_emb')(obj_embedding_input)
+    obj_embeddings = Broadcast(scene_features.shape, name='broadcast_e')(obj_embedding_input)
 
-    # combine the two sets of features
-    if scene_features.shape != tiled_obj_embeddings.shape:
-        raise Exception(f"scene_features [{scene_features.shape}",
-                        f" doesn't match shape of tiled_obj_embeddings [{tiled_obj_embeddings.shape}",
-                        f" possibly because spatial reduction wrong in scene network?")
-    obj_scene_features = Concatenate(axis=-1)([scene_features, tiled_obj_embeddings])
+    # element wise add scene_features with object embeddings
+    obj_scene_features = scene_features + obj_embeddings
+
+    # TODO: could also use squeeze excite like approach? i.e. small MLP applied to
+    #       obj embeddings, sigmoid, and use that that to scale scene_features
 
     # add classifier ( logits )
     classifier = obj_scene_features

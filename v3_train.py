@@ -108,6 +108,9 @@ yolz = Yolz(
     )
 params, nt_params = yolz.get_params()
 
+# yolz.embedding_model.summary()
+# yolz.scene_model.summary()
+
 # datasets
 train_ds = construct_datasets(
     opts.eg_train_root_dir, opts.num_batches,
@@ -216,7 +219,7 @@ with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
             params, nt_params, opt_state,
             obj_x, scene_x, scene_y_true)
 
-        if step % 1000 == 0:
+        if step % 100 == 0:
 
             metric_loss, scene_loss, _ = calculate_individual_losses(
                 params, nt_params, obj_x, scene_x, scene_y_true)
@@ -232,6 +235,8 @@ with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
                 wandb_to_log['scene_loss'] = scene_loss
                 losses.append((step, metric_loss, scene_loss))
 
+        if step % 1000 == 0:
+
             train_with_rnd_background_stats = stats(
                 params, nt_params, opts.eg_train_root_dir, num_egs=100,
                 random_background_colours=True)
@@ -241,10 +246,10 @@ with tqdm.tqdm(train_ds, total=opts.num_batches) as progress:
             validation_stats = stats(
                 params, nt_params, opts.eg_validate_root_dir, num_egs=100,
                 random_background_colours=False)
-            print("STATS", step,
-                  'train_rng_background_stats', train_with_rnd_background_stats,
-                  'train_without_rnd_background_stats', train_without_rnd_background_stats,
-                  'validate', validation_stats)
+            print('STATS', step)
+            print(' train_with_rnd_background_stats', train_with_rnd_background_stats)
+            print(' train_without_rnd_background_stats', train_without_rnd_background_stats)
+            print(' validation_stats', validation_stats)
 
             if opts.use_wandb:
                 wandb_to_log['train_rng_background_stats'] = train_with_rnd_background_stats
