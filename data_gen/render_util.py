@@ -1,6 +1,7 @@
 import pybullet as p
 from PIL import Image
 import numpy as np
+import random
 
 def render(hw: int, include_alpha: bool=False):
 
@@ -37,6 +38,47 @@ def render(hw: int, include_alpha: bool=False):
     alpha = Image.fromarray(alpha.astype(np.uint8), mode='L')
     img.putalpha(alpha)
     return img
+
+def render_scene(hw: int):
+
+    def random_in(a, b):
+        if a > b:
+            a, b = b, a
+        return a + (random.random() * (b - a))
+
+    # fov range 40 50
+    fov = random_in(40, 50)
+    proj_matrix = p.computeProjectionMatrixFOV(fov=fov,
+                                               aspect=float(hw) / hw,
+                                               nearVal=0.1,
+                                               farVal=100.0)
+
+    target_x = random_in(0.4, 0.6)
+    target_y = random_in(-0.1, 0.1)
+    target_z = 0
+    distance = random_in(1, 2)
+    yaw = random_in(0, 180)
+    pitch = random_in(-89, -60)
+    roll = random_in(-10, 10)
+    view_matrix = p.computeViewMatrixFromYawPitchRoll(cameraTargetPosition=(target_x, target_y, target_z),
+                                                      distance=distance,
+                                                      yaw=yaw, pitch=pitch, roll=roll,
+                                                      upAxisIndex=2)
+
+    rendering = p.getCameraImage(width=hw, height=hw,
+                                 viewMatrix=view_matrix,
+                                 projectionMatrix=proj_matrix,
+                                 shadow=1,
+                                 renderer=p.ER_BULLET_HARDWARE_OPENGL)
+
+    # note: render is 4 channel, but doesn't include alpha :/
+    render_rgba = rendering[2]
+    rgba_array = np.array(render_rgba, dtype=np.uint8)
+    rgb_array = rgba_array[:, :, :3]
+    img = Image.fromarray(rgb_array, 'RGB')
+
+    segmentation = rendering[4]
+    return img, segmentation
 
 # below is all the stuff related to bounding box we don't use yet...
 
