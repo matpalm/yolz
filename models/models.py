@@ -2,6 +2,7 @@ from typing import List, Tuple
 
 from keras.layers import Input, Dense, Conv2D, GlobalMaxPooling2D, Reshape
 from keras.layers import Layer, BatchNormalization, Activation, Concatenate
+from keras.layers import UpSampling2D
 from keras.models import Model
 from keras.initializers import TruncatedNormal, Constant
 
@@ -83,36 +84,46 @@ def construct_scene_model(
     init_classifier_bias: int=-5
     ):
 
-    # scene backbone
+    # scene backbone; downsampling
     scene_input = Input((height_width, height_width, 3), name='scene_input')
     y = scene_input
+    downscaling_outputs = []
     for i, f in enumerate(filter_sizes):
-        y = conv_bn_relu(filters=f, y=y, name=f"scene_{i}")
+        out = conv_bn_relu(filters=f, y=y, name=f"scene_down_{i}")
+        downscaling_outputs.append(out)
+        y = out
 
-    # final feature layer ( projection, no relu )
+    # final down layer ( projection, no relu )
     scene_features = Dense(
         feature_dim,
         use_bias=False, activation=None,
         kernel_initializer=TruncatedNormal(),
         name='scene_features')(y)  # (B, F)
 
-    # input branch from obj_embeddings
+    # inject the obj_embeddings by broadcasting them to match the spatial size of
+    # the scene features and element wise adding them
     obj_embedding_input = Input((expected_obj_embedding_dim,), name='obj_embedding_inp')
     if obj_embedding_input.shape[-1] != feature_dim:
-        raise Exception("needed obj_embedding_input final dim to match feature_dim")
-
-    # broadcast the embeddings to match the spatial size of the features
-    # from the scene backbone
-    obj_embeddings = Broadcast(scene_features.shape, name='broadcast_e')(obj_embedding_input)
-
-    # element wise add scene_features with object embeddings
+        raise Exception(f"expected obj_embedding_input embedding dim [{obj_embedding_input.shape}]"
+                        f" to match scene feature dim [{feature_dim}]")
+    obj_embeddings = Broadcast(y.shape, name='broadcast_e')(obj_embedding_input)
     obj_scene_features = scene_features + obj_embeddings
+
+    # upsampling back up, only 3 layers
+    y = obj_scene_features
+    down_idx = -2
+    for i in range(3):
+        y = UpSampling2D()(y)
+        y = conv_bn_relu(filters=filter_sizes[down_idx], y=y,
+                         one_by_one=True, name=f"scene_up_{i}")
+        y += downscaling_outputs[down_idx]
+        down_idx -= 1
 
     # TODO: could also use squeeze excite like approach? i.e. small MLP applied to
     #       obj embeddings, sigmoid, and use that that to scale scene_features
 
     # add classifier ( logits )
-    classifier = obj_scene_features
+    classifier = y
     for i, f in enumerate(classifier_filter_sizes):
         classifier = conv_bn_relu(filters=f, y=classifier,
                                   name=f"classifier_{i}", one_by_one=True)

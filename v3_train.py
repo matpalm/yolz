@@ -108,8 +108,8 @@ yolz = Yolz(
     )
 params, nt_params = yolz.get_params()
 
-# yolz.embedding_model.summary()
-# yolz.scene_model.summary()
+yolz.embedding_model.summary()
+yolz.scene_model.summary()
 
 # datasets
 train_ds = construct_datasets(
