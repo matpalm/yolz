@@ -40,3 +40,4 @@ for i, obj_id in enumerate(obj_ids):
         draw.line((xy*scale, 0, xy*scale, hw*scale))
         draw.line((0, xy*scale, hw*scale, xy*scale))
     masked_img.save(f"scene_egs/mask_{i}_{obj_id}.png")
+print("written to scene_egs")

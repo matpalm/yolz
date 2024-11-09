@@ -4,7 +4,7 @@ for W in 1 100; do
     export R=`dts`
     mkdir runs/$R
     cp models_config_eg.json runs/$R/models_config.json
-    time python3 v3_train.py \
+    time python3 train.py \
         --run-dir runs/$R \
         --models-config-json runs/$R/models_config.json \
         --num-batches 10000 \
