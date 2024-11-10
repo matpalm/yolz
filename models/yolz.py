@@ -60,11 +60,8 @@ class Yolz(object):
         return embeddings, e_nt_params  # (E,)
 
     def forward(self,
-                params: Tuple,     # 2 tuple, for embedding and scene model
-                nt_params: Tuple,  # 2 tuple, for embedding and scene model
-                anchors_a,
-                positives_a,
-                scene_img_a,
+                params, nt_params,
+                anchors_a, positives_a, scene_img_a,
                 training: bool):
 
         # split sub model params and nt_params
@@ -90,24 +87,22 @@ class Yolz(object):
     def test_step(self,
                   params, nt_params,
                   anchors_a, positives_a, scene_img_a):
-
+        # TODO: version of this that doesn't require positives
         _anchor_embeddings, _positive_embeddings, y_pred_logits, _nt_params = self.forward(
             params, nt_params,
-            anchors_a, positives_a, scene_img_a,
-            training=False)
+            anchors_a, positives_a, scene_img_a, training=False)
 
         return y_pred_logits
 
     def calculate_individual_losses(
         self,
         params, nt_params,
-        scene_img_a, masks_a, anchors_a, positives_a):
+        anchors_a, positives_a, scene_img_a, masks_a):
 
         # run forward through two networks
         anchor_embeddings, positive_embeddings, y_pred_logits, nt_params = self.forward(
             params, nt_params,
-            anchors_a, positives_a,
-            scene_img_a, training=True)
+            anchors_a, positives_a, scene_img_a, training=True)
 
         # calculate contrastive loss from obj embeddings
         gram_ish_matrix = jnp.einsum('ae,be->ab', anchor_embeddings, positive_embeddings)
@@ -127,11 +122,11 @@ class Yolz(object):
         return metric_loss, scene_loss, nt_params
 
     def calculate_single_loss(self, params, nt_params,
-                              scene_img_a, masks_a, anchors_a, positives_a):
+                              anchors_a, positives_a, scene_img_a, masks_a):
 
         metric_loss, scene_loss, nt_params = self.calculate_individual_losses(
             params, nt_params,
-            scene_img_a, masks_a, anchors_a, positives_a)
+            anchors_a, positives_a, scene_img_a, masks_a)
 
         loss = metric_loss * self.contrastive_loss_weight
         loss += scene_loss * self.classifier_loss_weight
@@ -139,11 +134,12 @@ class Yolz(object):
         return loss,  nt_params
 
     def calculate_gradients(self, params, nt_params,
-                            scene_img_a, masks_a, anchors_a, positives_a):
+                            anchors_a, positives_a, scene_img_a, masks_a):
 
         grad_fn = value_and_grad(self.calculate_single_loss, has_aux=True)
         (loss, nt_params), grads = grad_fn(
-            params, nt_params, scene_img_a, masks_a, anchors_a, positives_a)
+            params, nt_params,
+            anchors_a, positives_a, scene_img_a, masks_a)
         return (loss, nt_params), grads
 
     def write_weights(self, params, nt_params, weights_pkl):

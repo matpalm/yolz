@@ -208,19 +208,19 @@ def stats(params, nt_params, root_dir: str, num_egs: int, random_background_colo
 losses = []
 with tqdm.tqdm(train_ds.tf_dataset(repeats=100)) as progress:
     for step, batch in enumerate(progress):
-        scene_img_a, masks_a, anchors_a, positives_a = train_ds.process_batch(*batch)
+        anchors_a, positives_a, scene_img_a, masks_a  = train_ds.process_batch(*batch)
 
         wandb_to_log = {}
 
         params, nt_params, opt_state, _loss = train_step(
             params, nt_params, opt_state,
-            scene_img_a, masks_a, anchors_a, positives_a)
+            anchors_a, positives_a, scene_img_a, masks_a)
 
         if step % 100 == 0:
 
             metric_loss, scene_loss, _ = calculate_individual_losses(
                 params, nt_params,
-                scene_img_a, masks_a, anchors_a, positives_a)
+                anchors_a, positives_a, scene_img_a, masks_a)
             metric_loss, scene_loss = map(float, (metric_loss, scene_loss))
 
             progress.set_description(

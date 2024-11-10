@@ -119,17 +119,17 @@ class ContrastiveExamples(object):
             anchors_a = all_anc_pos_a[:, 0]
             positives_a = all_anc_pos_a[:, 1]
 
-            yield scene_img_a, masks_a, anchors_a, positives_a
+            yield anchors_a, positives_a, scene_img_a, masks_a
 
     def tf_dataset(self, repeats: int=1):
         N = self.instances_per_obj
         ds = tf.data.Dataset.from_generator(
             lambda: self._scene_and_anc_pos_generator(),
             output_signature=(
-                tf.TensorSpec(shape=(1, None, None, 3), dtype=tf.uint8),        # scene     (1, sH, sW, 3)     (0, 255)
-                tf.TensorSpec(shape=(None, None, None, 1), dtype=tf.uint8),     # masks     (C, mH, mW)        {0, 1}
                 tf.TensorSpec(shape=(None, N, None, None, 3), dtype=tf.uint8),  # anchors   (C, N, oH, oW, 3)  (0, 255)
                 tf.TensorSpec(shape=(None, N, None, None, 3), dtype=tf.uint8),  # positives (C, N, oH, oW, 3)  (0, 255)
+                tf.TensorSpec(shape=(1, None, None, 3), dtype=tf.uint8),        # scene     (1, sH, sW, 3)     (0, 255)
+                tf.TensorSpec(shape=(None, None, None, 1), dtype=tf.uint8)      # masks     (C, mH, mW)        {0, 1}
             )
         )
         # TODO: shuffle training?
@@ -137,12 +137,12 @@ class ContrastiveExamples(object):
         return ds.prefetch(tf.data.AUTOTUNE)
 
     @staticmethod
-    def process_batch(scene_img_a, masks_a, anchors_a, positives_a):
-        scene_img_a = jnp.array(scene_img_a, float) / 255
-        masks_a = jnp.array(masks_a, float)
+    def process_batch(anchors_a, positives_a, scene_img_a, masks_a):
         anchors_a = jnp.array(anchors_a, float) / 255
         positives_a = jnp.array(positives_a, float) / 255
-        return scene_img_a, masks_a, anchors_a, positives_a
+        scene_img_a = jnp.array(scene_img_a, float) / 255
+        masks_a = jnp.array(masks_a, float)
+        return anchors_a, positives_a, scene_img_a, masks_a
 
 if __name__ == '__main__':
     print("1")
@@ -155,14 +155,15 @@ if __name__ == '__main__':
     print("2")
     def info(a):
         return f"{a.shape} {a.dtype} ({np.min(a)}, {np.max(a)})"
-    for scene_img_a, masks_a, anchors_a, positives_a in as_numpy(ce.tf_dataset()):
-        print('scene_img_a', info(scene_img_a))   # (1, 640, 640, 3)
-        print('masks_a', info(masks_a))           # (16, 80, 80)
+    for batch in ce.tf_dataset():
+        anchors_a, positives_a, scene_img_a, masks_a = batch #ce.process_batch(*batch)
         print('anchors_a', info(anchors_a))       # (16, 9, 64, 64, 3)
         print('positives_a', info(positives_a))   # (16, 9, 64, 64, 3)
+        print('scene_img_a', info(scene_img_a))   # (1, 640, 640, 3)
+        print('masks_a', info(masks_a))           # (16, 80, 80)
         break
 
-
+    masks_a = np.squeeze(masks_a)  # drop trailing (,1)
     C = masks_a.shape[0]
     assert len(anchors_a) == C
     assert len(positives_a) == C
