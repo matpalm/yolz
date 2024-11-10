@@ -5,7 +5,7 @@ import random
 from PIL import Image
 import numpy as np
 import json
-
+import jax.numpy as jnp
 import util
 
 def load_fname(fname, background_colour=None):
@@ -25,20 +25,20 @@ def load_fname(fname, background_colour=None):
 class ContrastiveExamples(object):
 
     def __init__(self,
-                 scene_root_dir: str,
-                 reference_root_dir: str,
+                 root_dir: str,
+                 #reference_root_dir: str,
                  seed: int,
                  random_background_colours: bool,
-                 total_num_scenes: int,
+                 #total_num_scenes: int,
                  instances_per_obj: int  # N
                  ):
         # ['061', '002', '000']  # red, green, blue eg
-        self.scene_root_dir = scene_root_dir
-        self.reference_root_dir = reference_root_dir
-        self.scenes = os.listdir(scene_root_dir)
+        self.scene_root_dir = os.path.join(root_dir, 'scenes')
+        self.reference_root_dir = os.path.join(root_dir, 'reference_patches')
+        #self.scenes = os.listdir(scene_root_dir)
         self.rnd = random.Random(seed)
         self.random_background_colours = random_background_colours
-        self.total_num_scenes = total_num_scenes
+        #self.total_num_scenes = total_num_scenes
         self.instances_per_obj = instances_per_obj
         self.manifest = {}  # { obj_id: [fnames], ... }
         # mapping from str obj_ids to [0, 1, 2, ... ]
@@ -64,10 +64,10 @@ class ContrastiveExamples(object):
             return load_fname(fname, background_colour=(128, 128, 128))
 
     def _scene_and_anc_pos_generator(self):
-        for _ in range(self.total_num_scenes):
+        for scene_id in sorted(os.listdir(self.scene_root_dir)):
 
-            # pick a new random scene
-            scene_id = self.rnd.choice(self.scenes)
+            # # pick a new random scene
+            # scene_id = self.rnd.choice(self.scenes)
 
             # load the scene RGB ( and convert to np array )
             # and, since images need to be batched, batch as single
@@ -78,9 +78,10 @@ class ContrastiveExamples(object):
             scene_img_a = np.array(scene_img)
             scene_img_a = np.expand_dims(scene_img, 0)
 
-            # load the segmasks  ( C, mW, mH )
+            # load the segmasks and reshape to  ( C, mW, mH, 1 )
             masks_a = np.load(os.path.join(
                 self.scene_root_dir, scene_id, 'masks.npy'))
+            masks_a = np.expand_dims(masks_a, axis=-1)
 
             # load the obj_ids in this scene
             # ( these correspond to the rows in the mask )
@@ -96,8 +97,12 @@ class ContrastiveExamples(object):
             all_anc_pos_a = []
             for obj_id in obj_ids:
                 anc_pos_ids = set()
+                bail = 0
                 while len(anc_pos_ids) < 2 * self.instances_per_obj:
                     anc_pos_ids.add(self._random_example_for(obj_id))
+                    bail += 1
+                    if bail > 1000:
+                        raise Exception("bailing; too little data?")
                 # map from fnames to np arrays  ( 2N, oH, oW, 3 )
                 anc_pos_imgs_a = np.stack([self._load(f) for f in anc_pos_ids])
                 # add to all_ sets
@@ -116,29 +121,38 @@ class ContrastiveExamples(object):
 
             yield scene_img_a, masks_a, anchors_a, positives_a
 
-    def tf_dataset(self):
+    def tf_dataset(self, repeats: int=1):
         N = self.instances_per_obj
         ds = tf.data.Dataset.from_generator(
             lambda: self._scene_and_anc_pos_generator(),
             output_signature=(
                 tf.TensorSpec(shape=(1, None, None, 3), dtype=tf.uint8),        # scene     (1, sH, sW, 3)     (0, 255)
-                tf.TensorSpec(shape=(None, None, None), dtype=tf.uint8),        # masks     (C, mH, mW)        {0, 1}
+                tf.TensorSpec(shape=(None, None, None, 1), dtype=tf.uint8),     # masks     (C, mH, mW)        {0, 1}
                 tf.TensorSpec(shape=(None, N, None, None, 3), dtype=tf.uint8),  # anchors   (C, N, oH, oW, 3)  (0, 255)
                 tf.TensorSpec(shape=(None, N, None, None, 3), dtype=tf.uint8),  # positives (C, N, oH, oW, 3)  (0, 255)
             )
         )
+        # TODO: shuffle training?
+        ds = ds.repeat(repeats)
         return ds.prefetch(tf.data.AUTOTUNE)
 
+    @staticmethod
+    def process_batch(scene_img_a, masks_a, anchors_a, positives_a):
+        scene_img_a = jnp.array(scene_img_a, float) / 255
+        masks_a = jnp.array(masks_a, float)
+        anchors_a = jnp.array(anchors_a, float) / 255
+        positives_a = jnp.array(positives_a, float) / 255
+        return scene_img_a, masks_a, anchors_a, positives_a
 
 if __name__ == '__main__':
+    print("1")
     ce = ContrastiveExamples(
-        scene_root_dir = 'data/train/scenes',
-        reference_root_dir = 'data/train/reference_patches',
+        root_dir = 'data/train',
         seed = 123,
         random_background_colours = False,
-        total_num_scenes = 3,
         instances_per_obj = 9
     )
+    print("2")
     def info(a):
         return f"{a.shape} {a.dtype} ({np.min(a)}, {np.max(a)})"
     for scene_img_a, masks_a, anchors_a, positives_a in as_numpy(ce.tf_dataset()):
@@ -148,6 +162,7 @@ if __name__ == '__main__':
         print('positives_a', info(positives_a))   # (16, 9, 64, 64, 3)
         break
 
+
     C = masks_a.shape[0]
     assert len(anchors_a) == C
     assert len(positives_a) == C
@@ -156,7 +171,8 @@ if __name__ == '__main__':
 
     util.create_dir_if_required('data_egs')
 
-    NUM_EG_OBJS = 6
+    NUM_EG_OBJS = len(masks_a)
+    print('NUM_EG_OBJS', NUM_EG_OBJS)
 
     scene_img = util.to_pil_img(scene_img_a[0])
     scene_img.save(f"data_egs/scene.png")
@@ -168,9 +184,9 @@ if __name__ == '__main__':
         mask_a *= 255
         masked_img_a = np.concatenate([scene_img_a[0], mask_a], axis=-1)  # (640, 640, 4)
         masked_img = Image.fromarray(masked_img_a, 'RGBA')
-        masked_img.save(f"data_egs/mask.obj_id{obj_idx}.png")
+        masked_img.save(f"data_egs/obj_id{obj_idx:03d}.mask.png")
 
     for obj_idx in range(NUM_EG_OBJS):
         anchors = [util.to_pil_img(a) for a in anchors_a[obj_idx]]
         positives = [util.to_pil_img(p) for p in positives_a[obj_idx]]
-        util.collage(anchors+positives, 2, N).save(f"data_egs/anc_pos.obj_id{obj_idx}.png")
+        util.collage(anchors+positives, 2, N).save(f"data_egs/obj_id{obj_idx:03d}.anc_pos.png")

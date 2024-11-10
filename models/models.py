@@ -49,7 +49,6 @@ class Broadcast(Layer):
         batch_size = x.shape[0]
         scene_shape_without_batch = self.scene_hwc[1:]
         scene_shape = (batch_size, *scene_shape_without_batch)
-        print("Broadcasting x", x.shape, 'to shape', scene_shape)
         return jnp.broadcast_to(x[:,None,None,:], scene_shape)
 
 def construct_embedding_model(
@@ -79,7 +78,6 @@ def construct_scene_model(
     height_width: int,
     filter_sizes: List[int],
     feature_dim: int,
-    expected_obj_embedding_dim: int,
     classifier_filter_sizes: List[int],
     init_classifier_bias: int=-5
     ):
@@ -102,11 +100,11 @@ def construct_scene_model(
 
     # inject the obj_embeddings by broadcasting them to match the spatial size of
     # the scene features and element wise adding them
-    obj_embedding_input = Input((expected_obj_embedding_dim,), name='obj_embedding_inp')
+    obj_embedding_input = Input((feature_dim,), name='obj_embedding_inp')
     if obj_embedding_input.shape[-1] != feature_dim:
         raise Exception(f"expected obj_embedding_input embedding dim [{obj_embedding_input.shape}]"
                         f" to match scene feature dim [{feature_dim}]")
-    obj_embeddings = Broadcast(y.shape, name='broadcast_e')(obj_embedding_input)
+    obj_embeddings = Broadcast(scene_features.shape, name='broadcast_e')(obj_embedding_input)
     obj_scene_features = scene_features + obj_embeddings
 
     # upsampling back up, only 3 layers

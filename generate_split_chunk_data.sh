@@ -1,31 +1,40 @@
+
 set -ex
-export NE=1000
+
+export NUM_OBJ_EXAMPLES=100  # bump to 1000
+export NUM_SCENES=10
 
 python3 -m data_gen.render_reference_egs \
- --num-examples $NE \
+ --urdf-id-from 0 --urdf-id-to 800 \
+ --num-examples $NUM_OBJ_EXAMPLES \
  --output-dir data/train/reference_patches \
- --urdf-id-from 0 --urdf-id-to 640 --include-alpha &
-python3 -m data_gen.render_reference_egs \
- --num-examples $NE \
- --output-dir data/train/scene_patches \
- --urdf-id-from 640 --urdf-id-to 800 --include-alpha &
+ --include-alpha &
 
- python3 -m data_gen.render_reference_egs \
- --num-examples $NE \
- --output-dir data/validate/reference_patches \
- --urdf-id-from 800 --urdf-id-to 880 --include-alpha &
-python3 -m data_gen.render_reference_egs \
- --num-examples $NE \
- --output-dir data/validate/scene_patches \
- --urdf-id-from 880 --urdf-id-to 900 --include-alpha &
+python3 -m data_gen.render_scenes \
+  --urdf-id-from 0 --urdf-id-to 800 \
+  --num-scenes $NUM_SCENES \
+  --output-dir data/train/scenes &
 
- python3 -m data_gen.render_reference_egs \
- --num-examples $NE \
+python3 -m data_gen.render_reference_egs \
+ --urdf-id-from 801 --urdf-id-to 900 \
+ --num-examples $NUM_OBJ_EXAMPLES \
+ --output-dir data/validation/reference_patches \
+ --include-alpha &
+
+python3 -m data_gen.render_scenes \
+  --urdf-id-from 801 --urdf-id-to 900 \
+  --num-scenes $NUM_SCENES \
+  --output-dir data/validation/scenes &
+
+python3 -m data_gen.render_reference_egs \
+ --urdf-id-from 901 --urdf-id-to 1000 \
+ --num-examples $NUM_OBJ_EXAMPLES \
  --output-dir data/test/reference_patches \
- --urdf-id-from 900 --urdf-id-to 980 --include-alpha &
-python3 -m data_gen.render_reference_egs \
- --num-examples $NE \
- --output-dir data/test/scene_patches \
- --urdf-id-from 980 --urdf-id-to 1000 --include-alpha &
+ --include-alpha &
 
- wait
+python3 -m data_gen.render_scenes \
+  --urdf-id-from 901 --urdf-id-to 1000 \
+  --num-scenes $NUM_SCENES \
+  --output-dir data/test/scenes &
+
+wait
