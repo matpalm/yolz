@@ -30,7 +30,8 @@ class ContrastiveExamples(object):
                  seed: int,
                  random_background_colours: bool,
                  #total_num_scenes: int,
-                 instances_per_obj: int  # N
+                 instances_per_obj: int,  # N
+                 cache_dir: str=None
                  ):
         # ['061', '002', '000']  # red, green, blue eg
         self.scene_root_dir = os.path.join(root_dir, 'scenes')
@@ -41,9 +42,12 @@ class ContrastiveExamples(object):
         #self.total_num_scenes = total_num_scenes
         self.instances_per_obj = instances_per_obj
         self.manifest = {}  # { obj_id: [fnames], ... }
+        self.scenes = sorted(os.listdir(self.scene_root_dir))
         # mapping from str obj_ids to [0, 1, 2, ... ]
         #self.label_idx_to_str = dict(enumerate(self.obj_ids))  # { 0:'053', 1:'234', .... }
         #self.label_str_to_idx = {v: k for k, v in self.label_idx_to_str.items()}
+        util.create_dir_if_required(cache_dir)
+        self.cache_dir = cache_dir
 
     def _random_example_for(self, obj_id) -> str:
         obj_id = f"{obj_id:03d}"
@@ -64,7 +68,7 @@ class ContrastiveExamples(object):
             return load_fname(fname, background_colour=(128, 128, 128))
 
     def _scene_and_anc_pos_generator(self):
-        for scene_id in sorted(os.listdir(self.scene_root_dir)):
+        for scene_id in self.scenes:
 
             # # pick a new random scene
             # scene_id = self.rnd.choice(self.scenes)
@@ -121,7 +125,8 @@ class ContrastiveExamples(object):
 
             yield anchors_a, positives_a, scene_img_a, masks_a
 
-    def tf_dataset(self, repeats: int=1):
+
+    def tf_dataset(self, num_repeats: int=1):
         N = self.instances_per_obj
         ds = tf.data.Dataset.from_generator(
             lambda: self._scene_and_anc_pos_generator(),
@@ -132,8 +137,10 @@ class ContrastiveExamples(object):
                 tf.TensorSpec(shape=(None, None, None, 1), dtype=tf.uint8)      # masks     (C, mH, mW)        {0, 1}
             )
         )
-        # TODO: shuffle training?
-        ds = ds.repeat(repeats)
+        if self.cache_dir is not None:
+            ds = ds.cache(os.path.join(self.cache_dir, 'cache'))
+        if num_repeats > 1:
+            ds = ds.repeat(num_repeats)
         return ds.prefetch(tf.data.AUTOTUNE)
 
     @staticmethod
@@ -144,50 +151,52 @@ class ContrastiveExamples(object):
         masks_a = jnp.array(masks_a, float)
         return anchors_a, positives_a, scene_img_a, masks_a
 
-if __name__ == '__main__':
-    print("1")
-    ce = ContrastiveExamples(
-        root_dir = 'data/train',
-        seed = 123,
-        random_background_colours = False,
-        instances_per_obj = 9
-    )
-    print("2")
-    def info(a):
-        return f"{a.shape} {a.dtype} ({np.min(a)}, {np.max(a)})"
-    for batch in ce.tf_dataset():
-        anchors_a, positives_a, scene_img_a, masks_a = batch #ce.process_batch(*batch)
-        print('anchors_a', info(anchors_a))       # (16, 9, 64, 64, 3)
-        print('positives_a', info(positives_a))   # (16, 9, 64, 64, 3)
-        print('scene_img_a', info(scene_img_a))   # (1, 640, 640, 3)
-        print('masks_a', info(masks_a))           # (16, 80, 80)
-        break
+# if __name__ == '__main__':
+    # print("1")
+    # SEED = 123
+    # ce = ContrastiveExamples(
+    #     root_dir='data/train/',
+    #     seed=SEED,
+    #     random_background_colours=True,
+    #     instances_per_obj=8,
+    #     cache_dir=f"/data2/zero_shot_detection/scenes_cache/s{SEED}"
+    # )
+    # print("2")
+    # def info(a):
+    #     return f"{a.shape} {a.dtype} ({np.min(a)}, {np.max(a)})"
+    # for batch in ce.tf_dataset():
+    #     anchors_a, positives_a, scene_img_a, masks_a = batch #ce.process_batch(*batch)
+    #     print('anchors_a', info(anchors_a))       # (16, 9, 64, 64, 3)
+    #     print('positives_a', info(positives_a))   # (16, 9, 64, 64, 3)
+    #     print('scene_img_a', info(scene_img_a))   # (1, 640, 640, 3)
+    #     print('masks_a', info(masks_a))           # (16, 80, 80)
+    #     break
 
-    masks_a = np.squeeze(masks_a)  # drop trailing (,1)
-    C = masks_a.shape[0]
-    assert len(anchors_a) == C
-    assert len(positives_a) == C
-    N = anchors_a.shape[1]
-    assert positives_a.shape[1] == N
+    # masks_a = np.squeeze(masks_a)  # drop trailing (,1)
+    # C = masks_a.shape[0]
+    # assert len(anchors_a) == C
+    # assert len(positives_a) == C
+    # N = anchors_a.shape[1]
+    # assert positives_a.shape[1] == N
 
-    util.create_dir_if_required('data_egs')
+    # util.create_dir_if_required('data_egs')
 
-    NUM_EG_OBJS = len(masks_a)
-    print('NUM_EG_OBJS', NUM_EG_OBJS)
+    # NUM_EG_OBJS = len(masks_a)
+    # print('NUM_EG_OBJS', NUM_EG_OBJS)
 
-    scene_img = util.to_pil_img(scene_img_a[0])
-    scene_img.save(f"data_egs/scene.png")
+    # scene_img = util.to_pil_img(scene_img_a[0])
+    # scene_img.save(f"data_egs/scene.png")
 
-    for obj_idx in range(NUM_EG_OBJS):
-        mask_img = Image.fromarray(np.array(masks_a[obj_idx]), 'L')
-        mask_img = mask_img.resize(scene_img.size, Image.Resampling.NEAREST)
-        mask_a = np.expand_dims(np.array(mask_img), -1)
-        mask_a *= 255
-        masked_img_a = np.concatenate([scene_img_a[0], mask_a], axis=-1)  # (640, 640, 4)
-        masked_img = Image.fromarray(masked_img_a, 'RGBA')
-        masked_img.save(f"data_egs/obj_id{obj_idx:03d}.mask.png")
+    # for obj_idx in range(NUM_EG_OBJS):
+    #     mask_img = Image.fromarray(np.array(masks_a[obj_idx]), 'L')
+    #     mask_img = mask_img.resize(scene_img.size, Image.Resampling.NEAREST)
+    #     mask_a = np.expand_dims(np.array(mask_img), -1)
+    #     mask_a *= 255
+    #     masked_img_a = np.concatenate([scene_img_a[0], mask_a], axis=-1)  # (640, 640, 4)
+    #     masked_img = Image.fromarray(masked_img_a, 'RGBA')
+    #     masked_img.save(f"data_egs/obj_id{obj_idx:03d}.mask.png")
 
-    for obj_idx in range(NUM_EG_OBJS):
-        anchors = [util.to_pil_img(a) for a in anchors_a[obj_idx]]
-        positives = [util.to_pil_img(p) for p in positives_a[obj_idx]]
-        util.collage(anchors+positives, 2, N).save(f"data_egs/obj_id{obj_idx:03d}.anc_pos.png")
+    # for obj_idx in range(NUM_EG_OBJS):
+    #     anchors = [util.to_pil_img(a) for a in anchors_a[obj_idx]]
+    #     positives = [util.to_pil_img(p) for p in positives_a[obj_idx]]
+    #     util.collage(anchors+positives, 2, N).save(f"data_egs/obj_id{obj_idx:03d}.anc_pos.png")

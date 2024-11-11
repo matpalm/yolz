@@ -21,10 +21,10 @@ parser.add_argument('--urdf-id-to', type=int, default=10,
                     help='max urdf-id to choose from (exclusive)')
 parser.add_argument('--num-scenes', type=int, default=10,
                     help='number of examples to generate.')
+parser.add_argument('--base-scene-id', type=int, default=0,
+                    help='first scene id to generate. useful for secondary runs')
 parser.add_argument('--render-width-height', type=int, default=640)
 parser.add_argument('--segmask-width-height', type=int, default=80)
-parser.add_argument('--num-examples', type=int, default=10,
-                    help='total number of scene examples to generate')
 parser.add_argument('--num-distinct-objects-per-example', type=int, default=16,
                     help='the number of distinct urdf objects in each scene')
 parser.add_argument('--num-instances-per-object', type=int, default=4,
@@ -48,7 +48,9 @@ def random_in(a, b):
         a, b = b, a
     return a + (random.random() * (b - a))
 
-for example_id in tqdm(range(opts.num_examples)):
+for example_id in tqdm(range(opts.num_scenes)):
+
+    example_id += opts.base_scene_id
 
     output_dir = os.path.join(opts.output_dir, f"{example_id:06d}")
     create_dir_if_required(output_dir)

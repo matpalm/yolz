@@ -6,11 +6,11 @@ import json, tqdm
 import jax.numpy as jnp
 from jax import jit, nn
 import optax
-from sklearn.metrics import average_precision_score, recall_score, precision_score, f1_score
+#from sklearn.metrics import average_precision_score, recall_score, precision_score, f1_score
 
 from data import ContrastiveExamples
 from models.yolz import Yolz
-#from util import to_pil_img, smooth_highlight, highlight, collage, create_dir_if_required
+from util import array_to_pil_img, mask_to_pil_img, alpha_from_mask, collage, create_dir_if_required
 
 import numpy as np
 np.set_printoptions(precision=5, threshold=10000, suppress=True, linewidth=10000)
@@ -25,21 +25,20 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--run-dir', type=str, required=True,
                     help='where to store weights, losses.json, examples etc')
-parser.add_argument('--num-batches', type=int, default=100,
-                    help='effective epoch length')
-parser.add_argument('--num-obj-references', type=int, default=8,
-                    help='(N). number of samples for each instance sampled from'
-                         ' reference patches')
-parser.add_argument('--models-config-json', type=str, required=True,
-                    help='embedding model config json file')
+parser.add_argument('--num-repeats', type=int, default=1)
+# parser.add_argument('--num-obj-references', type=int, default=8,
+#                     help='(N). number of samples for each instance sampled from'
+#                          ' reference patches')
+# parser.add_argument('--models-config-json', type=str, required=True,
+#                     help='embedding model config json file')
 parser.add_argument('--initial-weights-pkl', type=str, default=None,
                     help='starting weights')
 parser.add_argument('--train-root-dir', type=str,
                     default='data/train/',
                     help='root dir for scene and reference_patches')
-parser.add_argument('--validate-root-dir', type=str,
-                    default='data/validate/',
-                    help='.')
+# parser.add_argument('--validate-root-dir', type=str,
+#                     default='data/validate/',
+                    # help='.')
 # parser.add_argument('--eg-obj-ids-json', type=str, default=None,
 #                     help='ids to use, json str. if None use all'
 #                          ' entries from --eg-root-dir')
@@ -52,30 +51,28 @@ parser.add_argument('--classifier-loss-weight', type=float, default=100.0)
 parser.add_argument('--focal-loss-alpha', type=float, default=0.5)
 parser.add_argument('--focal-loss-gamma', type=float, default=2.0)
 parser.add_argument('--use-wandb', action='store_true')
-parser.add_argument('--embedding-dim', type=int, default=None)
-parser.add_argument('--feature-dim', type=int, default=None)
-parser.add_argument('--init-classifier-bias', type=float, default=-5)
+# parser.add_argument('--embedding-dim', type=int, default=None)
+# parser.add_argument('--feature-dim', type=int, default=None)
+# parser.add_argument('--init-classifier-bias', type=float, default=-5)
 parser.add_argument('--seed', type=int, default=123)
-parser.add_argument('--test-threshold', type=float, default=0.1,
-                    help='threshold to use during validation for P/R/F1 calcs')
+# parser.add_argument('--test-threshold', type=float, default=0.1,
+#                     help='threshold to use during validation for P/R/F1 calcs')
 
 opts = parser.parse_args()
 print("opts", opts)
 
-# load base model config
-with open(opts.models_config_json, 'r') as f:
-    models_config = json.load(f)
-print('base models_config', models_config)
-
-# clobber with any specifically set flags
-if opts.embedding_dim is not None:
-    models_config['embedding']['embedding_dim'] = opts.embedding_dim
-    models_config['scene']['expected_obj_embedding_dim'] = opts.embedding_dim  # clumsy
-if opts.feature_dim is not None:
-    models_config['scene']['feature_dim'] = opts.feature_dim
-if opts.init_classifier_bias is not None:
-    models_config['scene']['init_classifier_bias'] = opts.init_classifier_bias
-print('models_config with --flag updates', models_config)
+models_config = {
+    'embedding': {'height_width': 64,
+                  'filter_sizes': [16, 32, 64, 256],
+                  'embedding_dim': 512},
+    'scene': {'height_width': 640,
+              'filter_sizes': [16, 32, 64, 128, 256, 256],
+              'feature_dim': 512,
+              'classifier_filter_sizes': [256, 128],
+              'init_classifier_bias': -5}
+}
+with open(os.path.join(opts.run_dir, 'model_config.json'), 'w') as f:
+    json.dump(models_config, f)
 
 if opts.use_wandb:
     import wandb
@@ -83,8 +80,9 @@ if opts.use_wandb:
                 name=opts.run_dir,
                 reinit=True)
     config = vars(opts)
-    config['embedding_dim'] = models_config['embedding']['embedding_dim']
-    config['feature_dim'] = models_config['scene']['feature_dim']
+    # TODO: work out how to pack model configs here
+#    config['embedding_dim'] = models_config['embedding']['embedding_dim']
+#    config['feature_dim'] = models_config['scene']['feature_dim']
     for k, v in config.items():
         wandb.config[k] = v
 
@@ -101,19 +99,19 @@ params, nt_params = yolz.get_params()
 yolz.embedding_model.summary()
 yolz.scene_model.summary()
 
-# datasets
 train_ds = ContrastiveExamples(
-    root_dir=opts.train_root_dir,
-    seed=opts.seed,
+    root_dir='/dev/shm/zero_shot_detection/data/train/',
+    seed=123,
     random_background_colours=True,
-    instances_per_obj=opts.num_obj_references)
-print("WARNING: VALIDATING WITH TRAIN")
-validate_ds = ContrastiveExamples(
-    #root_dir=opts.validate_root_dir,
-    root_dir=opts.train_root_dir,
-    seed=opts.seed,
-    random_background_colours=False,
-    instances_per_obj=opts.num_obj_references)
+    instances_per_obj=8,
+    cache_dir='/dev/shm/zero_shot_detection/cache/train')
+
+# validate_ds = ContrastiveExamples(
+#     root_dir=opts.validate_root_dir,
+#     root_dir=opts.train_root_dir,
+#     seed=opts.seed,
+#     random_background_colours=False,
+#     instances_per_obj=opts.num_obj_references)
 
 # set up training step & optimiser
 if opts.optimiser == 'adam':
@@ -125,14 +123,16 @@ elif opts.optimiser == 'sgd':
 else:
     raise Exception(f"unsupported --optimiser {opts.optimiser}")
 
+opt = optax.adam(learning_rate=opts.learning_rate)
 opt_state = opt.init(params)
-def train_step(
-    params, nt_params, opt_state,
-    scene_img_a, masks_a, anchors_a, positives_a):
+
+def train_step(params, nt_params,
+               opt_state,
+               anchors_a, positives_a, scene_img_a, masks_a):
     # calculate gradients
     (loss, nt_params), grads = yolz.calculate_gradients(
         params, nt_params,
-        scene_img_a, masks_a, anchors_a, positives_a)
+        anchors_a, positives_a, scene_img_a, masks_a)
     # calculate updates from optimiser
     updates, opt_state = opt.update(grads, opt_state, params)
     # apply updates to get new params
@@ -140,12 +140,55 @@ def train_step(
     # return
     return params, nt_params, opt_state, loss
 
-# compile various utils
 train_step = jit(train_step)
-test_step = jit(yolz.test_step)
 calculate_individual_losses = jit(yolz.calculate_individual_losses)
 
-print("running", opts.run_dir)
+# TODO: reinstate tqdm status bars
+step = 0
+for step, batch in enumerate(train_ds.tf_dataset(num_repeats=opts.num_repeats)):
+    anchors_a, positives_a, scene_img_a, masks_a  = train_ds.process_batch(*batch)
+
+    params, nt_params, opt_state, loss = train_step(
+        params, nt_params,
+        opt_state,
+        anchors_a, positives_a, scene_img_a, masks_a)
+
+    if step % 1000 == 0:
+        metric_loss, scene_loss, _ = calculate_individual_losses(
+            params, nt_params,
+            anchors_a, positives_a, scene_img_a, masks_a)
+        print(f"step={step} metric_loss={metric_loss} scene_loss={scene_loss}")
+
+    # TODO: figure out how to best do P/R/F1 etc. flood fills?
+    if step > 1000:
+        break
+
+y_pred_logits = yolz.test_step(
+    params, nt_params,
+    anchors_a, positives_a, scene_img_a)
+y_pred = nn.sigmoid(y_pred_logits.squeeze())
+
+# debug some reference examples
+for obj_idx in [4, 5, 6]:
+    num_egs = anchors_a.shape[1]
+    ref_images = [array_to_pil_img(anchors_a[obj_idx, a]) for a in range(num_egs)]
+    c = collage(ref_images, rows=1, cols=num_egs)
+    c.save(f"obj_{obj_idx}.anchors.png")
+    y_true_m = mask_to_pil_img(masks_a[obj_idx])
+    y_pred_m = mask_to_pil_img(y_pred[obj_idx])
+    c = collage([y_true_m, y_pred_m], rows=1, cols=2)
+    c.save(f"obj_{obj_idx}.y_true_pred.mask.png")
+    scene_rgb = array_to_pil_img(scene_img_a[0])
+    scene_with_y_pred = alpha_from_mask(scene_rgb, y_pred_m)
+    scene_with_y_true = alpha_from_mask(scene_rgb, y_true_m)
+    c = collage([scene_with_y_pred, scene_rgb, scene_with_y_true], rows=1, cols=3)
+    c.save(f"obj_{obj_idx}.y_true_pred.alpha.png")
+
+# write final weights
+yolz.write_weights(
+    params, nt_params,
+    os.path.join(opts.run_dir, 'models_weights.pkl'))
+
 
 # def generate_debug_imgs(step, obj_x, scene_x, scene_y_true, split):
 #     obj_x = jnp.array(obj_x)
@@ -177,11 +220,6 @@ print("running", opts.run_dir)
 #         losses.append(float(log_loss))
 #     return np.mean(losses)
 
-
-def stats(params, nt_params, root_dir: str, num_egs: int, random_background_colours: bool):
-    # TODO: port!
-    return {}
-
     # ds_for_log_loss = construct_datasets(
     #     root_dir, num_egs,
     #     obj_ids, yolz.classifier_spatial_size(), opts,
@@ -205,33 +243,34 @@ def stats(params, nt_params, root_dir: str, num_egs: int, random_background_colo
     #     'f1': f1_score(y_true_all, y_pred_all)
     #     }
 
-losses = []
-with tqdm.tqdm(train_ds.tf_dataset(repeats=100)) as progress:
-    for step, batch in enumerate(progress):
-        anchors_a, positives_a, scene_img_a, masks_a  = train_ds.process_batch(*batch)
+# losses = []
+# with tqdm.tqdm(train_ds.tf_dataset(opts.num_repeats)) as progress:
+#     for step, batch in enumerate(progress):
+#         anchors_a, positives_a, scene_img_a, masks_a  = train_ds.process_batch(*batch)
 
-        wandb_to_log = {}
+#         wandb_to_log = {}
 
-        params, nt_params, opt_state, _loss = train_step(
-            params, nt_params, opt_state,
-            anchors_a, positives_a, scene_img_a, masks_a)
+#         params, nt_params, opt_state, loss = train_step(
+#             params, nt_params, opt_state,
+#             anchors_a, positives_a, scene_img_a, masks_a)
+#         # print("step", step, "loss", loss)
 
-        if step % 100 == 0:
+#         if step % 100 == 0:
 
-            metric_loss, scene_loss, _ = calculate_individual_losses(
-                params, nt_params,
-                anchors_a, positives_a, scene_img_a, masks_a)
-            metric_loss, scene_loss = map(float, (metric_loss, scene_loss))
+#             metric_loss, scene_loss, _ = calculate_individual_losses(
+#                 params, nt_params,
+#                 anchors_a, positives_a, scene_img_a, masks_a)
+#             metric_loss, scene_loss = map(float, (metric_loss, scene_loss))
 
-            progress.set_description(
-                f"step {step} losses (weighted)"
-                f" metric {(metric_loss * opts.contrastive_loss_weight):0.5f}"
-                f" scene  {(scene_loss * opts.classifier_loss_weight):0.5f}")
+#             progress.set_description(
+#                 f"step {step} losses (weighted)"
+#                 f" metric {(metric_loss * opts.contrastive_loss_weight):0.5f}"
+#                 f" scene  {(scene_loss * opts.classifier_loss_weight):0.5f}")
 
-            if opts.use_wandb:
-                wandb_to_log['metric_loss'] = metric_loss
-                wandb_to_log['scene_loss'] = scene_loss
-                losses.append((step, metric_loss, scene_loss))
+#             if opts.use_wandb:
+#                 wandb_to_log['metric_loss'] = metric_loss
+#                 wandb_to_log['scene_loss'] = scene_loss
+#                 losses.append((step, metric_loss, scene_loss))
 
         # if step % 1000 == 0:
 
@@ -269,9 +308,8 @@ with tqdm.tqdm(train_ds.tf_dataset(repeats=100)) as progress:
         #     with open(os.path.join(opts.run_dir, 'losses.json'), 'w') as f:
         #         json.dump(losses, f)
 
-        if len(wandb_to_log) > 0:
-            wandb.log(step=step, data=wandb_to_log)
-
+        # if len(wandb_to_log) > 0:
+        #     wandb.log(step=step, data=wandb_to_log)
 
 
 

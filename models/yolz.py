@@ -14,8 +14,8 @@ class Yolz(object):
     def __init__(self, models_config,
                  initial_weights_pkl: str=None,
                  contrastive_loss_weight: int=1,
-                 classifier_loss_weight: int=100,
-                 focal_loss_alpha: float=0.5,
+                 classifier_loss_weight: int=10,
+                 focal_loss_alpha: float=0.25,
                  focal_loss_gamma: float=2.0):
 
         # clumsy
@@ -121,8 +121,9 @@ class Yolz(object):
         # return losses ( with nt_params updated from forward call )
         return metric_loss, scene_loss, nt_params
 
-    def calculate_single_loss(self, params, nt_params,
-                              anchors_a, positives_a, scene_img_a, masks_a):
+    def calculate_single_weighted_loss(
+            self, params, nt_params,
+            anchors_a, positives_a, scene_img_a, masks_a):
 
         metric_loss, scene_loss, nt_params = self.calculate_individual_losses(
             params, nt_params,
@@ -131,12 +132,12 @@ class Yolz(object):
         loss = metric_loss * self.contrastive_loss_weight
         loss += scene_loss * self.classifier_loss_weight
 
-        return loss,  nt_params
+        return loss, nt_params
 
     def calculate_gradients(self, params, nt_params,
                             anchors_a, positives_a, scene_img_a, masks_a):
 
-        grad_fn = value_and_grad(self.calculate_single_loss, has_aux=True)
+        grad_fn = value_and_grad(self.calculate_single_weighted_loss, has_aux=True)
         (loss, nt_params), grads = grad_fn(
             params, nt_params,
             anchors_a, positives_a, scene_img_a, masks_a)
