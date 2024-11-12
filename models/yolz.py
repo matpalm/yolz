@@ -59,26 +59,26 @@ class Yolz(object):
         embeddings /= jnp.linalg.norm(embeddings, axis=-1, keepdims=True)
         return embeddings, e_nt_params  # (E,)
 
-    def forward(self,
-                params, nt_params,
-                anchors_a, positives_a, scene_img_a,
-                training: bool):
+    def train_step(self,
+                   params, nt_params,
+                   anchors_a, positives_a, scene_img_a):
 
         # split sub model params and nt_params
         e_params, s_params = params
         e_nt_params, s_nt_params = nt_params
+        TRAINING = True
 
         # calculate mean embeddings for anchors and positives
         # we collect stats re: training for anchors, but drop nt params for positives
         v_mean_embeddings = vmap(self.mean_embeddings, in_axes=(None, None, 0, None))
-        positive_embeddings, _ = v_mean_embeddings(e_params, e_nt_params, positives_a, training)
-        anchor_embeddings, e_nt_params = v_mean_embeddings(e_params, e_nt_params, anchors_a, training)
+        positive_embeddings, _ = v_mean_embeddings(e_params, e_nt_params, positives_a, TRAINING)
+        anchor_embeddings, e_nt_params = v_mean_embeddings(e_params, e_nt_params, anchors_a, TRAINING)
         e_nt_params = [jnp.mean(p, axis=0) for p in e_nt_params]
 
         # run scene, using both rgb input and anchors as the embeddings
         y_pred_logits, s_nt_params = self.scene_model.stateless_call(
             s_params, s_nt_params,
-            [scene_img_a, anchor_embeddings], training)
+            [scene_img_a, anchor_embeddings], TRAINING)
 
         # return
         nt_params = e_nt_params, s_nt_params
@@ -86,23 +86,35 @@ class Yolz(object):
 
     def test_step(self,
                   params, nt_params,
-                  anchors_a, positives_a, scene_img_a):
-        # TODO: version of this that doesn't require positives
-        _anchor_embeddings, _positive_embeddings, y_pred_logits, _nt_params = self.forward(
-            params, nt_params,
-            anchors_a, positives_a, scene_img_a, training=False)
+                  anchors_a, scene_img_a):
 
-        return y_pred_logits
+        # split sub model params and nt_params
+        e_params, s_params = params
+        e_nt_params, s_nt_params = nt_params
+        NOT_TRAINING = False
+
+        # calculate mean embeddings for anchors and positives
+        # we collect stats re: training for anchors, but drop nt params for positives
+        v_mean_embeddings = vmap(self.mean_embeddings, in_axes=(None, None, 0, None))
+        anchor_embeddings, _ = v_mean_embeddings(e_params, e_nt_params, anchors_a, NOT_TRAINING)
+
+        # run scene, using both rgb input and anchors as the embeddings
+        y_pred_logits, _ = self.scene_model.stateless_call(
+            s_params, s_nt_params,
+            [scene_img_a, anchor_embeddings], NOT_TRAINING)
+
+        # return
+        return anchor_embeddings, y_pred_logits
 
     def calculate_individual_losses(
-        self,
-        params, nt_params,
-        anchors_a, positives_a, scene_img_a, masks_a):
+            self,
+            params, nt_params,
+            anchors_a, positives_a, scene_img_a, masks_a):
 
         # run forward through two networks
-        anchor_embeddings, positive_embeddings, y_pred_logits, nt_params = self.forward(
+        anchor_embeddings, positive_embeddings, y_pred_logits, nt_params = self.train_step(
             params, nt_params,
-            anchors_a, positives_a, scene_img_a, training=True)
+            anchors_a, positives_a, scene_img_a)
 
         # calculate contrastive loss from obj embeddings
         gram_ish_matrix = jnp.einsum('ae,be->ab', anchor_embeddings, positive_embeddings)

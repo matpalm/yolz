@@ -3,14 +3,13 @@ os.environ['KERAS_BACKEND'] = 'jax'
 
 import json, tqdm
 
-import jax.numpy as jnp
 from jax import jit, nn
 import optax
-#from sklearn.metrics import average_precision_score, recall_score, precision_score, f1_score
+from sklearn.metrics import recall_score, precision_score, f1_score
 
 from data import ContrastiveExamples
 from models.yolz import Yolz
-from util import array_to_pil_img, mask_to_pil_img, alpha_from_mask, collage, create_dir_if_required
+from util import generate_debug_imgs #array_to_pil_img, mask_to_pil_img, alpha_from_mask, collage, create_dir_if_required
 
 import numpy as np
 np.set_printoptions(precision=5, threshold=10000, suppress=True, linewidth=10000)
@@ -33,9 +32,9 @@ parser.add_argument('--num-repeats', type=int, default=1)
 #                     help='embedding model config json file')
 parser.add_argument('--initial-weights-pkl', type=str, default=None,
                     help='starting weights')
-parser.add_argument('--train-root-dir', type=str,
-                    default='data/train/',
-                    help='root dir for scene and reference_patches')
+# parser.add_argument('--train-root-dir', type=str,
+#                     default='data/train/',
+#                     help='root dir for scene and reference_patches')
 # parser.add_argument('--validate-root-dir', type=str,
 #                     default='data/validate/',
                     # help='.')
@@ -106,12 +105,12 @@ train_ds = ContrastiveExamples(
     instances_per_obj=8,
     cache_dir='/dev/shm/zero_shot_detection/cache/train')
 
-# validate_ds = ContrastiveExamples(
-#     root_dir=opts.validate_root_dir,
-#     root_dir=opts.train_root_dir,
-#     seed=opts.seed,
-#     random_background_colours=False,
-#     instances_per_obj=opts.num_obj_references)
+validate_ds = ContrastiveExamples(
+    root_dir='/dev/shm/zero_shot_detection/data/validate/',
+    seed=123,
+    random_background_colours=False,
+        instances_per_obj=8,
+    cache_dir='/dev/shm/zero_shot_detection/cache/validate')
 
 # set up training step & optimiser
 if opts.optimiser == 'adam':
@@ -159,36 +158,38 @@ for step, batch in enumerate(train_ds.tf_dataset(num_repeats=opts.num_repeats)):
             anchors_a, positives_a, scene_img_a, masks_a)
         print(f"step={step} metric_loss={metric_loss} scene_loss={scene_loss}")
 
-    # TODO: figure out how to best do P/R/F1 etc. flood fills?
-    if step > 1000:
-        break
+        @jit
+        def test_step(anchors_a, scene_img_a):
+            _anchor_embeddings, y_pred_logits = yolz.test_step(
+                params, nt_params, anchors_a, scene_img_a)
+            return y_pred_logits
 
-y_pred_logits = yolz.test_step(
-    params, nt_params,
-    anchors_a, positives_a, scene_img_a)
-y_pred = nn.sigmoid(y_pred_logits.squeeze())
+        # run most recent test example through debugging
+        y_pred_logits = test_step(anchors_a, scene_img_a)
+        y_pred = nn.sigmoid(y_pred_logits.squeeze())
 
-# debug some reference examples
-for obj_idx in [4, 5, 6]:
-    num_egs = anchors_a.shape[1]
-    ref_images = [array_to_pil_img(anchors_a[obj_idx, a]) for a in range(num_egs)]
-    c = collage(ref_images, rows=1, cols=num_egs)
-    c.save(f"obj_{obj_idx}.anchors.png")
-    y_true_m = mask_to_pil_img(masks_a[obj_idx])
-    y_pred_m = mask_to_pil_img(y_pred[obj_idx])
-    c = collage([y_true_m, y_pred_m], rows=1, cols=2)
-    c.save(f"obj_{obj_idx}.y_true_pred.mask.png")
-    scene_rgb = array_to_pil_img(scene_img_a[0])
-    scene_with_y_pred = alpha_from_mask(scene_rgb, y_pred_m)
-    scene_with_y_true = alpha_from_mask(scene_rgb, y_true_m)
-    c = collage([scene_with_y_pred, scene_rgb, scene_with_y_true], rows=1, cols=3)
-    c.save(f"obj_{obj_idx}.y_true_pred.alpha.png")
+        generate_debug_imgs(
+            anchors_a, scene_img_a, masks_a, y_pred,
+            step,
+            img_output_dir=os.path.join(opts.run_dir, 'debug_imgs'))
 
-# write final weights
-yolz.write_weights(
-    params, nt_params,
-    os.path.join(opts.run_dir, 'models_weights.pkl'))
+        # y_true = masks_a.flatten()
+        # y_pred = (y_pred > opts.threshold).astype(float).flatten()
+        # print({
+        #     'p': precision_score(y_true, y_pred),
+        #     'r': recall_score(y_true, y_pred),
+        #     'f1': f1_score(y_true, y_pred)
+        #     })
 
+        # write final weights
+        yolz.write_weights(
+            params, nt_params,
+            os.path.join(opts.run_dir, 'models_weights.pkl'))
+
+print(opts.run_dir)
+
+    # if step > 3000:
+    #     break
 
 # def generate_debug_imgs(step, obj_x, scene_x, scene_y_true, split):
 #     obj_x = jnp.array(obj_x)

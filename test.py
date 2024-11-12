@@ -5,107 +5,92 @@ os.environ['KERAS_BACKEND'] = 'jax'
 import json
 import os
 
-import jax.numpy as jnp
-from jax import jit, nn
-import numpy as np
+from util import array_to_pil_img, mask_to_pil_img, alpha_from_mask, collage, create_dir_if_required
+from sklearn.metrics import PrecisionRecallDisplay, precision_recall_curve
 
-from data import construct_datasets, jnp_arrayed
-from models.yolz import Yolz
-from util import binary_logistic_loss
+def pr_curve(y_true, y_pred):
+    prec, recall, _ = precision_recall_curve(y_true, y_pred) #, pos_label=clf.classes_[1])
+    return PrecisionRecallDisplay(precision=prec, recall=recall).plot()
 
-import argparse
-parser = argparse.ArgumentParser(
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--run-dir', type=str, default=100,
-                    help='where to store weights, losses.json, examples etc')
-parser.add_argument('--num-batches', type=int, default=100,
-                    help='effective epoch length')
-parser.add_argument('--num-obj-references', type=int, default=16,
-                    help='(N). number of reference samples for each instance in C')
-parser.add_argument('--num-focus-objs', type=int, default=32,
-                    help='(C). for embedding branch represents number of'
-                        ' anchor/positive pairs. for scene branch represents'
-                        ' the number of examples.')
-parser.add_argument('--models-config-json', type=str, required=True,
-                    help='embedding model config json file')
-parser.add_argument('--eg-validate-root-dir', type=str,
-                    default='data/validate/reference_patches',
-                    help='.')
-parser.add_argument('--eg-obj-ids-json', type=str, default=None,
-                    help='ids to use, json str. if None use all'
-                         ' entries from --eg-root-dir')
-# parser.add_argument('--learning-rate', type=float, default=1e-3,
-#                     help='adam learning rate')
-parser.add_argument('--stop-anchor-gradient', action='store_true')
-# parser.add_argument('--contrastive-loss-weight', type=float, default=1.0)
-# parser.add_argument('--classifier-loss-weight', type=float, default=100.0)
-# parser.add_argument('--weights-pkl', type=str, default=None,
-#                     help='where to save final weights')
-# parser.add_argument('--losses-json', type=str, default=None,
-#                     help='where to write json list of losses')
-parser.add_argument('--embedding-dim', type=int, default=None)
-parser.add_argument('--feature-dim', type=int, default=None)
-parser.add_argument('--seed', type=int, default=123)
-parser.add_argument('--threshold', type=float, default=0.1)
+if __name__ == '__main__':
 
-opts = parser.parse_args()
-print("opts", opts)
+    from data import ContrastiveExamples
+    from models.yolz import Yolz
+    from jax import jit, nn
 
-if (opts.eg_obj_ids_json is None) or (opts.eg_obj_ids_json == ''):
-    obj_ids = None
-else:
-    obj_ids = json.loads(opts.eg_obj_ids_json)
+    import argparse
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--run-dir', type=str, required=True,
+                        help='where to store weights, losses.json, examples etc')
+    # parser.add_argument('--validate-root-dir', type=str,
+    #                     default='data/validate/reference_patches',
+    #                     help='.')
+    parser.add_argument('--threshold', type=float, default=0.5)
 
-# load base model config
-with open(opts.models_config_json, 'r') as f:
-    models_config = json.load(f)
-print('base models_config', models_config)
+    opts = parser.parse_args()
+    print("opts", opts)
 
-# clobber with any specifically set flags
-if opts.embedding_dim is not None:
-    models_config['embedding']['embedding_dim'] = opts.embedding_dim
-    models_config['scene']['expected_obj_embedding_dim'] = opts.embedding_dim  # clumsy
-if opts.feature_dim is not None:
-    models_config['scene']['feature_dim'] = opts.feature_dim
-print('models_config with --flag updates', models_config)
+    with open(os.path.join(opts.run_dir, 'model_config.json'), 'r') as f:
+        models_config = json.load(f)
 
-yolz = Yolz(models_config,
-            os.path.join(opts.run_dir, 'models_weights.pkl'))
+    yolz = Yolz(
+        models_config,
+        initial_weights_pkl=os.path.join(opts.run_dir, 'models_weights.pkl'),
+        contrastive_loss_weight=1,
+        classifier_loss_weight=1,
+        focal_loss_alpha=1,
+        focal_loss_gamma=1
+        )
 
-validate_ds = construct_datasets(
-    opts.eg_validate_root_dir, 100,
-    obj_ids, yolz.classifier_spatial_size(), opts,
-    random_background_colours=False,
-    seed=opts.seed)
+    @jit
+    def test_step(anchors_a, scene_img_a):
+        params, nt_params = yolz.get_params()
+        return yolz.test_step(params, nt_params, anchors_a, scene_img_a)
 
-@jit
-def test_step(obj_x, scene_x):
-    params, nt_params = yolz.get_params()
-    return yolz.test_step(params, nt_params, obj_x, scene_x)
+    validate_ds = ContrastiveExamples(
+        root_dir='/dev/shm/zero_shot_detection/data/train/',
+        seed=123,
+        random_background_colours=False,
+        instances_per_obj=8,
+        cache_dir='/dev/shm/zero_shot_detection/cache/train')
 
-import time
+    y_true_all = []
+    y_pred_all = []
 
-from sklearn.metrics import *
+    for step, batch in enumerate(validate_ds.tf_dataset(num_repeats=1)):
+        anchors_a, _positives_a, scene_img_a, y_true  = validate_ds.process_batch(*batch)
+        #y_true = np.array(y_true)
 
-y_true_all = []
-y_pred_all = []
+        _embeddings, y_pred_logits = test_step(anchors_a, scene_img_a)
+        y_pred = nn.sigmoid(y_pred_logits.squeeze())
 
-for step, (obj_x, scene_x, scene_y_true) in enumerate(jnp_arrayed(validate_ds)):
-    s = time.perf_counter()
-    y_pred_logit = test_step(obj_x, scene_x)
-    y_pred_logit = y_pred_logit.flatten()
-    y_pred = nn.sigmoid(y_pred_logit)
-    y_true = scene_y_true.flatten()
-    y_pred = (y_pred > opts.threshold).astype(float)
-    y_true_all.append(y_true)
-    y_pred_all.append(y_pred)
-    if step > 3:
-        break
+        # debug some reference examples
+        img_output_dir = os.path.join(opts.run_dir, 'test_imgs')
+        create_dir_if_required(img_output_dir)
+        for obj_idx in range(len(anchors_a)):
+            num_egs = anchors_a.shape[1]
+            ref_images = [array_to_pil_img(anchors_a[obj_idx, a]) for a in range(num_egs)]
+            c = collage(ref_images, rows=2, cols=4)
+            c.save(f"{img_output_dir}/step_{step:06d}.obj_{obj_idx}.anchors.png")
+            y_true_m = mask_to_pil_img(y_true[obj_idx])
+            y_pred_m = mask_to_pil_img(y_pred[obj_idx])
+            c = collage([y_true_m, y_pred_m], rows=1, cols=2)
+            c.save(f"{img_output_dir}/step_{step:06d}.obj_{obj_idx}.y_true_pred.mask.png")
+            scene_rgb = array_to_pil_img(scene_img_a[0])
+            scene_with_y_pred = alpha_from_mask(scene_rgb, y_pred_m)
+            scene_with_y_true = alpha_from_mask(scene_rgb, y_true_m)
+            c = collage([scene_with_y_pred, scene_rgb, scene_with_y_true], rows=1, cols=3)
+            c.save(f"{img_output_dir}/step_{step:06d}.obj_{obj_idx}.y_true_pred.alpha.png")
 
-y_true_all = np.concatenate(y_true_all)
-y_pred_all = np.concatenate(y_pred_all)
-print(confusion_matrix(y_true_all, y_pred_all))
-print('average_p', average_precision_score(y_true_all, y_pred_all))
-print('p', recall_score(y_true_all, y_pred_all))
-print('r', precision_score(y_true_all, y_pred_all))
-print('f1', f1_score(y_true_all, y_pred_all))
+        y_true_all.extend(y_true.flatten())
+        y_pred_all.extend(y_pred.flatten())
+
+        # y_pred = (y_pred > opts.threshold).astype(float)
+        # print({
+        #     'p': precision_score(y_true, y_pred),
+        #     'r': recall_score(y_true, y_pred),
+        #     'f1': f1_score(y_true, y_pred)
+        #     })
+
+        if step > 10: break
