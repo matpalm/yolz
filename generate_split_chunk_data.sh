@@ -13,19 +13,19 @@ export NUM_SCENES=1000
 python3 -m data_gen.render_scenes \
   --urdf-id-from 0 --urdf-id-to 800 \
   --num-scenes $NUM_SCENES \
-  --base-scene-id 3000 --seed 3000 \
+  --base-scene-id 6000 --seed 6000 \
   --output-dir data/train/scenes &
 
 python3 -m data_gen.render_scenes \
   --urdf-id-from 0 --urdf-id-to 800 \
   --num-scenes $NUM_SCENES \
-  --base-scene-id 4000 --seed 4000 \
+  --base-scene-id 7000 --seed 7000 \
   --output-dir data/train/scenes &
 
 python3 -m data_gen.render_scenes \
   --urdf-id-from 0 --urdf-id-to 800 \
   --num-scenes $NUM_SCENES \
-  --base-scene-id 5000 --seed 5000 \
+  --base-scene-id 8000 --seed 8000 \
   --output-dir data/train/scenes &
 
 # python3 -m data_gen.render_reference_egs \

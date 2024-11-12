@@ -67,6 +67,9 @@ class ContrastiveExamples(object):
         else:
             return load_fname(fname, background_colour=(128, 128, 128))
 
+    def num_scenes(self):
+        return len(self.scenes)
+
     def _scene_and_anc_pos_generator(self):
         for scene_id in self.scenes:
 

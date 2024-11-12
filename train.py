@@ -5,14 +5,19 @@ import json, tqdm
 
 from jax import jit, nn
 import optax
-from sklearn.metrics import recall_score, precision_score, f1_score
 
 from data import ContrastiveExamples
 from models.yolz import Yolz
-from util import generate_debug_imgs #array_to_pil_img, mask_to_pil_img, alpha_from_mask, collage, create_dir_if_required
+from util import create_dir_if_required, generate_debug_imgs
 
 import numpy as np
 np.set_printoptions(precision=5, threshold=10000, suppress=True, linewidth=10000)
+
+from sklearn.metrics import PrecisionRecallDisplay, precision_recall_curve
+from sklearn.metrics import precision_score, recall_score, f1_score, roc_curve, auc
+
+import wandb
+
 
 # # from jaxopt
 # from jax.nn import softplus
@@ -68,21 +73,20 @@ models_config = {
               'filter_sizes': [16, 32, 64, 128, 256, 256],
               'feature_dim': 512,
               'classifier_filter_sizes': [256, 128],
-              'init_classifier_bias': -5}
+              'init_classifier_bias': -5,
+              'mixing_strategy': 'elementwise_add'}
 }
 with open(os.path.join(opts.run_dir, 'model_config.json'), 'w') as f:
     json.dump(models_config, f)
 
 if opts.use_wandb:
-    import wandb
     wandb.init(project='yolz',
                 name=opts.run_dir,
                 reinit=True)
-    config = vars(opts)
-    # TODO: work out how to pack model configs here
-#    config['embedding_dim'] = models_config['embedding']['embedding_dim']
-#    config['feature_dim'] = models_config['scene']['feature_dim']
-    for k, v in config.items():
+    wandb.config['model_version'] = 'v4'
+    for k, v in vars(opts).items():
+        wandb.config[k] = v
+    for k, v in models_config.items():  # wandb will unpack to embedding.embedding_dim etc
         wandb.config[k] = v
 
 # create model and extract initial params
@@ -106,11 +110,11 @@ train_ds = ContrastiveExamples(
     cache_dir='/dev/shm/zero_shot_detection/cache/train')
 
 validate_ds = ContrastiveExamples(
-    root_dir='/dev/shm/zero_shot_detection/data/validate/',
+    root_dir='/dev/shm/zero_shot_detection/data/validation/',
     seed=123,
     random_background_colours=False,
         instances_per_obj=8,
-    cache_dir='/dev/shm/zero_shot_detection/cache/validate')
+    cache_dir='/dev/shm/zero_shot_detection/cache/validation')
 
 # set up training step & optimiser
 if opts.optimiser == 'adam':
@@ -142,49 +146,85 @@ def train_step(params, nt_params,
 train_step = jit(train_step)
 calculate_individual_losses = jit(yolz.calculate_individual_losses)
 
-# TODO: reinstate tqdm status bars
-step = 0
-for step, batch in enumerate(train_ds.tf_dataset(num_repeats=opts.num_repeats)):
-    anchors_a, positives_a, scene_img_a, masks_a  = train_ds.process_batch(*batch)
+total_steps = train_ds.num_scenes() * opts.num_repeats
+print(f"|train scenes|={train_ds.num_scenes()}, repeats={opts.num_repeats}"
+      f" => total_steps={total_steps}")
 
-    params, nt_params, opt_state, loss = train_step(
-        params, nt_params,
-        opt_state,
-        anchors_a, positives_a, scene_img_a, masks_a)
+with tqdm.tqdm(train_ds.tf_dataset(opts.num_repeats), total=total_steps) as progress:
+    for step, batch in enumerate(progress):
 
-    if step % 1000 == 0:
-        metric_loss, scene_loss, _ = calculate_individual_losses(
+        wandb_to_log = {}
+
+        anchors_a, positives_a, scene_img_a, masks_a = train_ds.process_batch(*batch)
+
+        params, nt_params, opt_state, loss = train_step(
             params, nt_params,
+            opt_state,
             anchors_a, positives_a, scene_img_a, masks_a)
-        print(f"step={step} metric_loss={metric_loss} scene_loss={scene_loss}")
 
-        @jit
-        def test_step(anchors_a, scene_img_a):
-            _anchor_embeddings, y_pred_logits = yolz.test_step(
-                params, nt_params, anchors_a, scene_img_a)
-            return y_pred_logits
+        if step % 100 == 0:
+            metric_loss, scene_loss, _ = calculate_individual_losses(
+                params, nt_params,
+                anchors_a, positives_a, scene_img_a, masks_a)
 
-        # run most recent test example through debugging
-        y_pred_logits = test_step(anchors_a, scene_img_a)
-        y_pred = nn.sigmoid(y_pred_logits.squeeze())
+            progress.set_description(f"metric_loss={metric_loss} scene_loss={scene_loss}")
+            wandb_to_log['metric_loss'] = metric_loss
+            wandb_to_log['scene_loss'] = scene_loss
 
-        generate_debug_imgs(
-            anchors_a, scene_img_a, masks_a, y_pred,
-            step,
-            img_output_dir=os.path.join(opts.run_dir, 'debug_imgs'))
+        if step % 2500 == 0:
 
-        # y_true = masks_a.flatten()
-        # y_pred = (y_pred > opts.threshold).astype(float).flatten()
-        # print({
-        #     'p': precision_score(y_true, y_pred),
-        #     'r': recall_score(y_true, y_pred),
-        #     'f1': f1_score(y_true, y_pred)
-        #     })
+            # write weights
+            yolz.write_weights(
+                params, nt_params,
+                os.path.join(opts.run_dir, 'models_weights.pkl'))
 
-        # write final weights
-        yolz.write_weights(
-            params, nt_params,
-            os.path.join(opts.run_dir, 'models_weights.pkl'))
+            @jit
+            def test_step(anchors_a, scene_img_a):
+                _anchor_embeddings, y_pred_logits = yolz.test_step(
+                    params, nt_params, anchors_a, scene_img_a)
+                return nn.sigmoid(y_pred_logits).squeeze()
+
+            # run most recent test example through debugging images
+            y_pred = test_step(anchors_a, scene_img_a)
+            generate_debug_imgs(
+                anchors_a, scene_img_a, masks_a, y_pred,
+                step,
+                img_output_dir=os.path.join(opts.run_dir, 'debug_imgs'))
+
+            # collect all validation data
+            y_true = np.array([])
+            y_pred = np.array([])
+            flattened = lambda a: np.array(a).flatten()
+            for batch in validate_ds.tf_dataset():
+                anchors_a, _positives_a, scene_img_a, masks_a = validate_ds.process_batch(*batch)
+                y_true = np.append(y_true, flattened(masks_a))
+                y_pred = np.append(y_pred, flattened(test_step(anchors_a, scene_img_a)))
+            prec, recall, _ = precision_recall_curve(y_true, y_pred) #, pos_label=clf.classes_[1])
+            display = PrecisionRecallDisplay(precision=prec, recall=recall)
+            display.plot()
+            create_dir_if_required(os.path.join(opts.run_dir, 'p_r_curves'))
+            display.figure_.savefig(os.path.join(opts.run_dir, 'p_r_curves', f"s_{step:08d}.png"))
+
+            # calculation some p/r/f1 stats. log the 0.5 case
+            wandb_to_log['validation'] = {}
+            for threshold in [0.25, 0.5, 0.75]:
+                y_pred_t = (y_pred >= threshold).astype(float)
+                precision = precision_score(y_true, y_pred_t, zero_division=0)
+                recall = recall_score(y_true, y_pred_t)
+                f1 = f1_score(y_true, y_pred_t)
+                print(f"threshold {threshold:.2f} precision {precision:.2f} recall {recall:.2f} f1 {f1:.2f}")
+                if threshold == 0.5:
+                    wandb_to_log['validation']['precision@0.5'] = precision
+                    wandb_to_log['validation']['recall@0.5'] = recall
+                    wandb_to_log['validation']['f1@0.5'] = f1
+            # also log overall AUC ( though this seems way too high??? )
+            fpr, tpr, _thresholds = roc_curve(y_true, y_pred)
+            validation_auc = auc(fpr, tpr)
+            print('validation auc', validation_auc)
+            wandb_to_log['validation']['auc'] = validation_auc
+
+        if opts.use_wandb and len(wandb_to_log) > 0:
+            wandb.log(step=step, data=wandb_to_log)
 
 print(opts.run_dir)
 
