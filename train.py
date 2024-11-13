@@ -73,7 +73,7 @@ models_config = {
               'filter_sizes': [16, 32, 64, 128, 256, 256],
               'feature_dim': 512,
               'classifier_filter_sizes': [256, 128],
-              'init_classifier_bias': -5,
+              'init_classifier_bias': -6,
               'mixing_strategy': 'elementwise_add'}
 }
 with open(os.path.join(opts.run_dir, 'model_config.json'), 'w') as f:
@@ -174,9 +174,10 @@ with tqdm.tqdm(train_ds.tf_dataset(opts.num_repeats), total=total_steps) as prog
         if step % 2500 == 0:
 
             # write weights
+            create_dir_if_required(os.path.join(opts.run_dir, 'models_weights'))
             yolz.write_weights(
                 params, nt_params,
-                os.path.join(opts.run_dir, 'models_weights.pkl'))
+                os.path.join(opts.run_dir, 'models_weights', f"s_{step:08d}.pkl"))
 
             @jit
             def test_step(anchors_a, scene_img_a):
