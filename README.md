@@ -9,7 +9,7 @@ see https://matpalm.com/blog/yolz for a walkthrough
 
 ![highlevel diagram of model](model.png)
 
-![example result](step_045000.obj_5.y_true_pred.alpha.png)
+<iframe width="560" height="315" src="https://www.youtube.com/embed/BSsPbPos-ZQ?si=yYLkxGWxWrr9Vy_m" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 
 ## high level repro
 
