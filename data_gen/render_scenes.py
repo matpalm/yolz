@@ -30,11 +30,14 @@ parser.add_argument('--num-distinct-objects-per-example', type=int, default=16,
 parser.add_argument('--num-instances-per-object', type=int, default=4,
                     help='how many of each object is in a scene')
 parser.add_argument('--output-dir', type=str, required=True)
-parser.add_argument('--seed', type=int, default=1337)
+parser.add_argument('--seed', type=int, default=None)
 opts = parser.parse_args()
 print(opts)
 
-random.seed(opts.seed)
+if opts.seed is None:
+    random.seed(opts.base_scene_id)
+else:
+    random.seed(opts.seed)
 
 urdf_ids = range(opts.urdf_id_from, opts.urdf_id_to)
 

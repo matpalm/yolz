@@ -29,38 +29,20 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--run-dir', type=str, required=True,
                     help='where to store weights, losses.json, examples etc')
+parser.add_argument('--train-root-dir', type=str, default='data/train/')
+parser.add_argument('--validate-root-dir', type=str, default='data/validation/')
 parser.add_argument('--num-repeats', type=int, default=1)
-# parser.add_argument('--num-obj-references', type=int, default=8,
-#                     help='(N). number of samples for each instance sampled from'
-#                          ' reference patches')
-# parser.add_argument('--models-config-json', type=str, required=True,
-#                     help='embedding model config json file')
 parser.add_argument('--initial-weights-pkl', type=str, default=None,
                     help='starting weights')
-# parser.add_argument('--train-root-dir', type=str,
-#                     default='data/train/',
-#                     help='root dir for scene and reference_patches')
-# parser.add_argument('--validate-root-dir', type=str,
-#                     default='data/validate/',
-                    # help='.')
-# parser.add_argument('--eg-obj-ids-json', type=str, default=None,
-#                     help='ids to use, json str. if None use all'
-#                          ' entries from --eg-root-dir')
 parser.add_argument('--optimiser', type=str, default='adam')
 parser.add_argument('--learning-rate', type=float, default=1e-3,
                     help='adam learning rate')
-# parser.add_argument('--stop-anchor-gradient', action='store_true')
 parser.add_argument('--contrastive-loss-weight', type=float, default=1.0)
 parser.add_argument('--classifier-loss-weight', type=float, default=100.0)
 parser.add_argument('--focal-loss-alpha', type=float, default=0.5)
 parser.add_argument('--focal-loss-gamma', type=float, default=2.0)
 parser.add_argument('--use-wandb', action='store_true')
-# parser.add_argument('--embedding-dim', type=int, default=None)
-# parser.add_argument('--feature-dim', type=int, default=None)
-# parser.add_argument('--init-classifier-bias', type=float, default=-5)
 parser.add_argument('--seed', type=int, default=123)
-# parser.add_argument('--test-threshold', type=float, default=0.1,
-#                     help='threshold to use during validation for P/R/F1 calcs')
 
 opts = parser.parse_args()
 print("opts", opts)
@@ -68,10 +50,10 @@ print("opts", opts)
 models_config = {
     'embedding': {'height_width': 64,
                   'filter_sizes': [16, 32, 64, 256],
-                  'embedding_dim': 512},
+                  'embedding_dim': 256},
     'scene': {'height_width': 640,
               'filter_sizes': [16, 32, 64, 128, 256, 256],
-              'feature_dim': 512,
+              'feature_dim': 256,
               'classifier_filter_sizes': [256, 128],
               'init_classifier_bias': -6,
               'mixing_strategy': 'elementwise_add'}
@@ -99,22 +81,22 @@ yolz = Yolz(
     focal_loss_gamma=opts.focal_loss_gamma
     )
 params, nt_params = yolz.get_params()
-yolz.embedding_model.summary()
-yolz.scene_model.summary()
+# yolz.embedding_model.summary()
+# yolz.scene_model.summary()
 
 train_ds = ContrastiveExamples(
-    root_dir='/dev/shm/zero_shot_detection/data/train/',
+    root_dir=opts.train_root_dir,
     seed=123,
     random_background_colours=True,
     instances_per_obj=8,
-    cache_dir='/dev/shm/zero_shot_detection/cache/train')
+    cache_dir=None)
 
 validate_ds = ContrastiveExamples(
-    root_dir='/dev/shm/zero_shot_detection/data/validation/',
+    root_dir=opts.validate_root_dir,
     seed=123,
     random_background_colours=False,
-        instances_per_obj=8,
-    cache_dir='/dev/shm/zero_shot_detection/cache/validation')
+    instances_per_obj=8,
+    cache_dir=None)
 
 # set up training step & optimiser
 if opts.optimiser == 'adam':
@@ -125,8 +107,6 @@ elif opts.optimiser == 'sgd':
     opt = optax.sgd(learning_rate=opts.learning_rate, momentum=0.9)
 else:
     raise Exception(f"unsupported --optimiser {opts.optimiser}")
-
-opt = optax.adam(learning_rate=opts.learning_rate)
 opt_state = opt.init(params)
 
 def train_step(params, nt_params,
@@ -187,10 +167,12 @@ with tqdm.tqdm(train_ds.tf_dataset(opts.num_repeats), total=total_steps) as prog
 
             # run most recent test example through debugging images
             y_pred = test_step(anchors_a, scene_img_a)
-            generate_debug_imgs(
-                anchors_a, scene_img_a, masks_a, y_pred,
-                step,
-                img_output_dir=os.path.join(opts.run_dir, 'debug_imgs'))
+
+            # TODO: add back in
+            # generate_debug_imgs(
+            #     anchors_a, scene_img_a, masks_a, y_pred,
+            #     step,
+            #     img_output_dir=os.path.join(opts.run_dir, 'debug_imgs'))
 
             # collect all validation data
             y_true = np.array([])

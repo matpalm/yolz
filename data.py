@@ -26,7 +26,6 @@ class ContrastiveExamples(object):
 
     def __init__(self,
                  root_dir: str,
-                 #reference_root_dir: str,
                  seed: int,
                  random_background_colours: bool,
                  #total_num_scenes: int,
@@ -69,6 +68,14 @@ class ContrastiveExamples(object):
 
     def num_scenes(self):
         return len(self.scenes)
+
+    def obj_id_to_urdf_mapping(self, scene):
+        if type(scene) == int:
+            scene = f"{scene:06d}"  # clumsy
+        json_fname = os.path.join(self.scene_root_dir, scene, 'obj_ids.json')
+        with open(json_fname, 'r') as f:
+            obj_ids = json.load(f)
+        return dict(enumerate(obj_ids))  # { idx: id, ... }
 
     def _scene_and_anc_pos_generator(self):
         for scene_id in self.scenes:

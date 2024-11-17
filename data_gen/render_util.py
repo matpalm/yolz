@@ -39,28 +39,35 @@ def render(hw: int, include_alpha: bool=False):
     img.putalpha(alpha)
     return img
 
+def random_in(a, b):
+    if a > b:
+        a, b = b, a
+    return a + (random.random() * (b - a))
+
 def render_scene(hw: int):
-
-    def random_in(a, b):
-        if a > b:
-            a, b = b, a
-        return a + (random.random() * (b - a))
-
-    # fov range 40 50
     fov = random_in(40, 50)
+    tx = random_in(0.4, 0.6)
+    ty = random_in(-0.1, 0.1)
+    tz = 0
+    target = tx, ty, tz
+    distance = random_in(1, 2)
+    yaw = random_in(0, 180)
+    pitch = random_in(-89, -60)
+    roll = random_in(-10, 10)
+    return render_scene_with_params(
+        hw, fov,
+        target, distance,
+        yaw, pitch, roll
+    )
+
+def render_scene_with_params(hw, fov, target, distance, yaw, pitch, roll):
+
     proj_matrix = p.computeProjectionMatrixFOV(fov=fov,
                                                aspect=float(hw) / hw,
                                                nearVal=0.1,
                                                farVal=100.0)
 
-    target_x = random_in(0.4, 0.6)
-    target_y = random_in(-0.1, 0.1)
-    target_z = 0
-    distance = random_in(1, 2)
-    yaw = random_in(0, 180)
-    pitch = random_in(-89, -60)
-    roll = random_in(-10, 10)
-    view_matrix = p.computeViewMatrixFromYawPitchRoll(cameraTargetPosition=(target_x, target_y, target_z),
+    view_matrix = p.computeViewMatrixFromYawPitchRoll(cameraTargetPosition=target,
                                                       distance=distance,
                                                       yaw=yaw, pitch=pitch, roll=roll,
                                                       upAxisIndex=2)
